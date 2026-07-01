@@ -19,3 +19,7 @@ env:
     value: "55731fee-cff8-4c44-86c8-3486ab4b4efb"
   - name: LAKEBASE_ENDPOINT
     value: "projects/horizon-ai-innovation/branches/production/endpoints/primary"
+  - name: DATABRICKS_TOKEN
+    valueFrom:
+      secretRef:
+        name: "horizon-iq-portal/lakebase-token"
