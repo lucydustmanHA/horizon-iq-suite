@@ -1,12 +1,7 @@
 command:
   - "sh"
   - "-c"
-  - >-
-    npm install --legacy-peer-deps &&
-    sed -i 's|import { nodeFileTrace } from "@vercel/nft";|import _nft from "@vercel/nft"; const { nodeFileTrace } = _nft;|g'
-    node_modules/nf3/dist/_chunks/trace.mjs 2>/dev/null || true &&
-    NITRO_PRESET=node-server npm run build &&
-    node .output/server/index.mjs
+  - "npm install --legacy-peer-deps && sed -i 's|import { nodeFileTrace } from \"@vercel/nft\";|import _nft from \"@vercel/nft\"; const { nodeFileTrace } = _nft;|g' node_modules/nf3/dist/_chunks/trace.mjs 2>/dev/null || true && NITRO_PRESET=node-server npm run build && node .output/server/index.mjs"
 
 env:
   - name: PGHOST
