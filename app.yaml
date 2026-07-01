@@ -1,7 +1,7 @@
 command:
   - "sh"
   - "-c"
-  - "npm install --legacy-peer-deps && npm run build && node .output/server/index.mjs"
+  - "npm install --legacy-peer-deps && NITRO_PRESET=node-server npm run build && node .output/server/index.mjs"
 
 env:
   - name: PGHOST
