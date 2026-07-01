@@ -1,0 +1,14 @@
+command:
+  - "sh"
+  - "-c"
+  - "npm install --legacy-peer-deps && npm run build && node .output/server/index.mjs"
+
+env:
+  - name: PGHOST
+    value: "ep-summer-silence-eenujnkm.database.westus2.azuredatabricks.net"
+  - name: PGDATABASE
+    value: "databricks_postgres"
+  - name: PGPORT
+    value: "5432"
+  - name: LAKEBASE_ENDPOINT
+    value: "projects/horizon-ai-innovation/branches/production/endpoints/primary"

@@ -26,16 +26,15 @@ export const STATUSES = [
 export type Status = (typeof STATUSES)[number];
 
 export const WORKGROUPS = [
-  "Flight Ops",
-  "Ground Handling",
+  "Back Office",
+  "SOC",
+  "Flt Ops",
+  "Inflight",
+  "M&E",
+  "Safety",
   "Stations",
-  "Finance Operations",
-  "Safety & HR",
-  "Customer Experience",
-  "Cargo",
-  "Engineering",
 ] as const;
-export type Workgroup = (typeof WORKGROUPS)[number];
+export type Workgroup = string; // string to accept any DB value
 
 export const CATEGORIES = [
   "Automation",
@@ -86,7 +85,7 @@ export interface UseCase {
   title: string;
   description: string;
 
-  workgroup: Workgroup;
+  workgroup: string;
   businessArea: string;
   strategicGoal: string;
   grouping: string;
@@ -105,7 +104,7 @@ export interface UseCase {
   risk: Risk;
   priority: Priority;
 
-  status: Status;
+  status: string;
   stage: Stage;
   currentSection: string;
 

@@ -13,6 +13,8 @@ import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { AppShell } from "../components/app-shell";
 import { Toaster } from "../components/ui/sonner";
+import { usePortfolio } from "../lib/store";
+import { $loadUseCases } from "../lib/use-cases.server";
 
 function NotFoundComponent() {
   return (
@@ -135,6 +137,15 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  const { initialized, setUseCases } = usePortfolio();
+
+  useEffect(() => {
+    if (!initialized) {
+      $loadUseCases()
+        .then(setUseCases)
+        .catch((err) => console.error("[DB] Failed to load use cases:", err));
+    }
+  }, [initialized, setUseCases]);
 
   return (
     <QueryClientProvider client={queryClient}>

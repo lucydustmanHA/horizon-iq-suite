@@ -2,10 +2,13 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { UseCase, Stage, CommentEntry, ActivityEntry } from "./types";
 import { generateSeedUseCases } from "./mock-data";
+import { $moveStage, $updateUseCase, $addComment } from "./use-cases.server";
 
 interface PortfolioState {
   useCases: UseCase[];
   loadedAt: number;
+  initialized: boolean;
+  setUseCases: (ucs: UseCase[]) => void;
   moveStage: (id: string, to: Stage) => void;
   updateUseCase: (id: string, patch: Partial<UseCase>) => void;
   addComment: (id: string, body: string, author?: string) => void;
@@ -30,7 +33,11 @@ export const usePortfolio = create<PortfolioState>()(
     (set) => ({
       useCases: generateSeedUseCases(),
       loadedAt: Date.now(),
-      moveStage: (id, to) =>
+      initialized: false,
+      setUseCases: (ucs) =>
+        set({ useCases: ucs, initialized: true, loadedAt: Date.now() }),
+      moveStage: (id, to) => {
+        const from = usePortfolio.getState().useCases.find((u) => u.id === id)?.stage ?? "";
         set((s) => ({
           useCases: s.useCases.map((uc) => {
             if (uc.id !== id || uc.stage === to) return uc;
@@ -40,8 +47,12 @@ export const usePortfolio = create<PortfolioState>()(
               actor: "You",
             });
           }),
-        })),
-      updateUseCase: (id, patch) =>
+        }));
+        $moveStage({ data: { id, from, to } }).catch((err) =>
+          console.error("[DB] moveStage failed:", err)
+        );
+      },
+      updateUseCase: (id, patch) => {
         set((s) => ({
           useCases: s.useCases.map((uc) => {
             if (uc.id !== id) return uc;
@@ -59,8 +70,12 @@ export const usePortfolio = create<PortfolioState>()(
             if (!entries.length) next.lastModifiedDate = new Date().toISOString();
             return next;
           }),
-        })),
-      addComment: (id, body, author = "You") =>
+        }));
+        $updateUseCase({ data: { id, patch } }).catch((err) =>
+          console.error("[DB] updateUseCase failed:", err)
+        );
+      },
+      addComment: (id, body, author = "You") => {
         set((s) => ({
           useCases: s.useCases.map((uc) => {
             if (uc.id !== id) return uc;
@@ -75,7 +90,11 @@ export const usePortfolio = create<PortfolioState>()(
               { type: "comment", message: `${author} commented`, actor: author },
             );
           }),
-        })),
+        }));
+        $addComment({ data: { id, body, author } }).catch((err) =>
+          console.error("[DB] addComment failed:", err)
+        );
+      },
       resetSeed: () => set({ useCases: generateSeedUseCases(), loadedAt: Date.now() }),
     }),
     { name: "horizon-qx-portfolio-v1" },

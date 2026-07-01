@@ -1,0 +1,161 @@
+/**
+ * use-cases.server.ts — TanStack Start server functions for Lakebase CRUD.
+ * Called from client components; run on the server and hit Lakebase directly.
+ */
+import { createServerFn } from "@tanstack/react-start";
+import { getDb } from "./db.server";
+import type { UseCase } from "./types";
+
+// ---------------------------------------------------------------------------
+// DB row → UseCase mapper
+// ---------------------------------------------------------------------------
+function rowToUseCase(r: Record<string, unknown>): UseCase {
+  return {
+    id: String(r.use_case_id ?? ""),
+    title: String(r.title ?? ""),
+    description: String(r.description ?? ""),
+    workgroup: String(r.workgroup ?? ""),
+    businessArea: String(r.business_area ?? ""),
+    strategicGoal: String(r.strategic_goal ?? ""),
+    grouping: String(r.grouping ?? ""),
+    businessOwner: String(r.business_owner ?? ""),
+    useCaseOwner: String(r.use_case_owner ?? ""),
+    developer: String(r.developer ?? ""),
+    technicalLead: String(r.technical_lead ?? ""),
+    category: (r.category as UseCase["category"]) ?? "Analytics",
+    tags: Array.isArray(r.tags) ? (r.tags as string[]) : [],
+    solutionType: (r.solution_type as UseCase["solutionType"]) ?? "Custom App",
+    dataSource: String(r.data_source ?? ""),
+    complexity: (Number(r.complexity) || 3) as UseCase["complexity"],
+    risk: (Number(r.risk) || 3) as UseCase["risk"],
+    priority: (Number(r.priority) || 2) as UseCase["priority"],
+    status: (r.status as UseCase["status"]) ?? "Not Started",
+    stage: (r.stage as UseCase["stage"]) ?? "Submitted",
+    currentSection: String(r.current_section ?? ""),
+    createdDate: r.created_date
+      ? new Date(r.created_date as string).toISOString()
+      : new Date().toISOString(),
+    lastModifiedDate: r.last_modified_date
+      ? new Date(r.last_modified_date as string).toISOString()
+      : new Date().toISOString(),
+    timeSavedPerMonth: Number(r.time_saved_per_month) || 0,
+    annualTimeSaved: Number(r.annual_time_saved) || 0,
+    costSavings: Number(r.cost_savings) || 0,
+    effortBefore: (Number(r.effort_before) || 3) as UseCase["effortBefore"],
+    effortAfter: (Number(r.effort_after) || 2) as UseCase["effortAfter"],
+    proactivePct: Number(r.proactive_work_pct) || 50,
+    reactivePct: Number(r.reactive_work_pct) || 50,
+    comments: [],
+    attachments: [],
+    links: r.links ? [String(r.links)] : [],
+    activity: [],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Server functions
+// ---------------------------------------------------------------------------
+
+/** Load all use cases from Lakebase. */
+export const $loadUseCases = createServerFn({ method: "GET" }).handler(
+  async (): Promise<UseCase[]> => {
+    const db = await getDb();
+    const { rows } = await db.query(
+      "SELECT * FROM public.use_cases ORDER BY id"
+    );
+    return rows.map(rowToUseCase);
+  }
+);
+
+/** Move a use case to a new stage and log the activity. */
+export const $moveStage = createServerFn({ method: "POST" })
+  .validator((data: { id: string; from: string; to: string }) => data)
+  .handler(async ({ data }) => {
+    const db = await getDb();
+    await db.query(
+      `UPDATE public.use_cases
+         SET stage = $1, last_modified_date = NOW()
+       WHERE use_case_id = $2`,
+      [data.to, data.id]
+    );
+    await db.query(
+      `INSERT INTO public.use_case_activity
+         (use_case_id, field_changed, old_value, new_value, changed_by)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [data.id, "stage", data.from, data.to, "user"]
+    );
+  });
+
+/** Patch any fields on a use case. */
+export const $updateUseCase = createServerFn({ method: "POST" })
+  .validator((data: { id: string; patch: Partial<UseCase> }) => data)
+  .handler(async ({ data }) => {
+    const db = await getDb();
+    const { patch, id } = data;
+    const fields: string[] = [];
+    const values: unknown[] = [];
+    let i = 1;
+
+    const map: Record<string, string> = {
+      title: "title",
+      description: "description",
+      workgroup: "workgroup",
+      businessArea: "business_area",
+      strategicGoal: "strategic_goal",
+      grouping: "grouping",
+      businessOwner: "business_owner",
+      useCaseOwner: "use_case_owner",
+      developer: "developer",
+      technicalLead: "technical_lead",
+      category: "category",
+      tags: "tags",
+      solutionType: "solution_type",
+      dataSource: "data_source",
+      complexity: "complexity",
+      risk: "risk",
+      priority: "priority",
+      status: "status",
+      stage: "stage",
+      timeSavedPerMonth: "time_saved_per_month",
+      annualTimeSaved: "annual_time_saved",
+      costSavings: "cost_savings",
+      effortBefore: "effort_before",
+      effortAfter: "effort_after",
+      proactivePct: "proactive_work_pct",
+      reactivePct: "reactive_work_pct",
+      comments: "comments",
+      links: "links",
+    };
+
+    for (const [key, col] of Object.entries(map)) {
+      if (key in patch) {
+        fields.push(`${col} = ${i++}`);
+        values.push((patch as Record<string, unknown>)[key]);
+      }
+    }
+    if (!fields.length) return;
+
+    fields.push(`last_modified_date = NOW()`);
+    values.push(id);
+    await db.query(
+      `UPDATE public.use_cases SET ${fields.join(", ")} WHERE use_case_id = ${i}`,
+      values
+    );
+  });
+
+/** Add a comment to a use case. */
+export const $addComment = createServerFn({ method: "POST" })
+  .validator((data: { id: string; body: string; author: string }) => data)
+  .handler(async ({ data }) => {
+    const db = await getDb();
+    await db.query(
+      `INSERT INTO public.use_case_activity
+         (use_case_id, field_changed, new_value, changed_by, note)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [data.id, "comment", data.body, data.author, data.body]
+    );
+    await db.query(
+      `UPDATE public.use_cases SET last_modified_date = NOW() WHERE use_case_id = $1`,
+      [data.id]
+    );
+  });
