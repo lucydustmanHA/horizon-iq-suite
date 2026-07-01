@@ -59,11 +59,18 @@ function rowToUseCase(r: Record<string, unknown>): UseCase {
 /** Load all use cases from Lakebase. */
 export const $loadUseCases = createServerFn({ method: "GET" }).handler(
   async (): Promise<UseCase[]> => {
-    const db = await getDb();
-    const { rows } = await db.query(
-      "SELECT * FROM public.use_cases ORDER BY id"
-    );
-    return rows.map(rowToUseCase);
+    console.log("[DB] $loadUseCases called");
+    try {
+      const db = await getDb();
+      const { rows } = await db.query(
+        "SELECT * FROM public.use_cases ORDER BY id"
+      );
+      console.log(`[DB] Loaded ${rows.length} use cases`);
+      return rows.map(rowToUseCase);
+    } catch (err) {
+      console.error("[DB] $loadUseCases failed:", err);
+      throw err;
+    }
   }
 );
 

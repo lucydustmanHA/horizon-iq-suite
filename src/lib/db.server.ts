@@ -16,20 +16,23 @@ let _pool: pg.Pool | null = null;
 let _tokenExpiresAt = 0;
 
 async function generateToken(): Promise<string> {
-  const url = `${DATABRICKS_HOST}/api/2.0/postgres/${LAKEBASE_ENDPOINT}:generateDatabaseCredential`;
+  // Correct API: POST /api/2.0/postgres/credentials with endpoint in body
+  const url = `${DATABRICKS_HOST}/api/2.0/postgres/credentials`;
+  console.log(`[DB] Fetching Lakebase credential from ${url}`);
   const res = await fetch(url, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${DATABRICKS_TOKEN}`,
       "Content-Type": "application/json",
     },
-    body: "{}",
+    body: JSON.stringify({ endpoint: LAKEBASE_ENDPOINT }),
   });
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`Lakebase credential error ${res.status}: ${text}`);
   }
   const data = (await res.json()) as { token: string };
+  console.log(`[DB] Credential obtained successfully`);
   return data.token;
 }
 
@@ -42,17 +45,19 @@ export async function getDb(): Promise<pg.Pool> {
       await _pool.end().catch(() => {});
     }
     const password = await generateToken();
+    const user = process.env.PGUSER ?? "";
+    console.log(`[DB] Creating pool user=${user}`);
     _pool = new Pool({
       host: process.env.PGHOST ?? "ep-summer-silence-eenujnkm.database.westus2.azuredatabricks.net",
       database: process.env.PGDATABASE ?? "databricks_postgres",
-      user: process.env.PGUSER ?? DATABRICKS_TOKEN.split(".")[0], // SP identity
+      user,
       password,
       port: Number(process.env.PGPORT ?? 5432),
       ssl: { rejectUnauthorized: false },
       max: 5,
       idleTimeoutMillis: 30_000,
     });
-    _tokenExpiresAt = now + 55 * 60 * 1000; // 55-min window (token valid 1h)
+    _tokenExpiresAt = now + 55 * 60 * 1000; // 55-min window
   }
   return _pool;
 }
