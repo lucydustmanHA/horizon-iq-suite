@@ -166,3 +166,37 @@ export const $addComment = createServerFn({ method: "POST" })
       [data.id]
     );
   });
+
+
+/** Create a new use case in Lakebase. */
+export const $createUseCase = createServerFn({ method: "POST" })
+  .validator((data: { title: string; workgroup: string; stage: string; owner: string; description: string }) => data)
+  .handler(async ({ data }) => {
+    console.log("[DB] $createUseCase called:", data.title);
+    try {
+      const db = await getDb();
+      // Generate next sequential ID
+      const { rows: lastRow } = await db.query(
+        "SELECT use_case_id FROM public.use_cases ORDER BY id DESC LIMIT 1"
+      );
+      const lastId: string = lastRow[0]?.use_case_id ?? "UC-0000";
+      const num = parseInt(lastId.replace("UC-", ""), 10) + 1;
+      const newId = `UC-${String(num).padStart(4, "0")}`;
+
+      await db.query(
+        `INSERT INTO public.use_cases
+           (use_case_id, title, description, workgroup, stage, use_case_owner, created_date, last_modified_date)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())`,
+        [newId, data.title, data.description, data.workgroup, data.stage, data.owner]
+      );
+      const { rows } = await db.query(
+        "SELECT * FROM public.use_cases WHERE use_case_id = $1",
+        [newId]
+      );
+      console.log(`[DB] $createUseCase created ${newId}`);
+      return rowToUseCase(rows[0]);
+    } catch (err) {
+      console.error("[DB] $createUseCase failed:", err);
+      throw err;
+    }
+  });
