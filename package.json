@@ -9,7 +9,8 @@
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "lint": "eslint .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "postinstall": "sed -i 's|import { nodeFileTrace } from \"@vercel/nft\";|import _nft from \"@vercel/nft\"; const { nodeFileTrace } = _nft;|g' node_modules/nf3/dist/_chunks/trace.mjs 2>/dev/null || true"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
