@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as KanbanRouteImport } from './routes/kanban'
+import { Route as InsightsRouteImport } from './routes/insights'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as UseCasesIndexRouteImport } from './routes/use-cases.index'
 import { Route as UseCasesIdRouteImport } from './routes/use-cases.$id'
@@ -17,6 +18,11 @@ import { Route as UseCasesIdRouteImport } from './routes/use-cases.$id'
 const KanbanRoute = KanbanRouteImport.update({
   id: '/kanban',
   path: '/kanban',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InsightsRoute = InsightsRouteImport.update({
+  id: '/insights',
+  path: '/insights',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -37,12 +43,14 @@ const UseCasesIdRoute = UseCasesIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/insights': typeof InsightsRoute
   '/kanban': typeof KanbanRoute
   '/use-cases/$id': typeof UseCasesIdRoute
   '/use-cases/': typeof UseCasesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/insights': typeof InsightsRoute
   '/kanban': typeof KanbanRoute
   '/use-cases/$id': typeof UseCasesIdRoute
   '/use-cases': typeof UseCasesIndexRoute
@@ -50,20 +58,28 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/insights': typeof InsightsRoute
   '/kanban': typeof KanbanRoute
   '/use-cases/$id': typeof UseCasesIdRoute
   '/use-cases/': typeof UseCasesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/kanban' | '/use-cases/$id' | '/use-cases/'
+  fullPaths: '/' | '/insights' | '/kanban' | '/use-cases/$id' | '/use-cases/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/kanban' | '/use-cases/$id' | '/use-cases'
-  id: '__root__' | '/' | '/kanban' | '/use-cases/$id' | '/use-cases/'
+  to: '/' | '/insights' | '/kanban' | '/use-cases/$id' | '/use-cases'
+  id:
+    | '__root__'
+    | '/'
+    | '/insights'
+    | '/kanban'
+    | '/use-cases/$id'
+    | '/use-cases/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  InsightsRoute: typeof InsightsRoute
   KanbanRoute: typeof KanbanRoute
   UseCasesIdRoute: typeof UseCasesIdRoute
   UseCasesIndexRoute: typeof UseCasesIndexRoute
@@ -76,6 +92,13 @@ declare module '@tanstack/react-router' {
       path: '/kanban'
       fullPath: '/kanban'
       preLoaderRoute: typeof KanbanRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/insights': {
+      id: '/insights'
+      path: '/insights'
+      fullPath: '/insights'
+      preLoaderRoute: typeof InsightsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -104,6 +127,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  InsightsRoute: InsightsRoute,
   KanbanRoute: KanbanRoute,
   UseCasesIdRoute: UseCasesIdRoute,
   UseCasesIndexRoute: UseCasesIndexRoute,
