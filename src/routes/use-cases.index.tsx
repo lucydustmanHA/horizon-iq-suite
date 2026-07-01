@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { usePortfolio } from "../lib/store";
 import { STAGES, WORKGROUPS } from "../lib/types";
-import { StageBadge, PriorityBadge, StatusBadge, OwnerAvatar, RiskDot } from "../components/badges";
+import { StageBadge, PriorityBadge, StatusBadge, OwnerAvatar } from "../components/badges";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
@@ -23,7 +23,7 @@ function UseCasesPage() {
   const [q, setQ] = useState("");
   const [wg, setWg] = useState<string>("all");
   const [stage, setStage] = useState<string>("all");
-  const [sortKey, setSortKey] = useState<"priority" | "title" | "stage" | "risk" | "savings">("priority");
+  const [sortKey, setSortKey] = useState<"priority" | "title" | "stage" | "savings">("priority");
 
   const rows = useMemo(() => {
     let r = useCases.filter((u) => {
@@ -35,16 +35,15 @@ function UseCasesPage() {
           u.title.toLowerCase().includes(s) ||
           u.id.toLowerCase().includes(s) ||
           u.description.toLowerCase().includes(s) ||
-          u.tags.some((t) => t.toLowerCase().includes(s))
+          (u.tags ?? []).some((t) => t.toLowerCase().includes(s))
         );
       }
       return true;
     });
     const cmp: Record<typeof sortKey, (a: (typeof r)[number], b: (typeof r)[number]) => number> = {
-      priority: (a, b) => b.priority - a.priority,
+      priority: (a, b) => ((a.priority ?? 99) - (b.priority ?? 99)),  // 1=2026 first
       title: (a, b) => a.title.localeCompare(b.title),
       stage: (a, b) => a.stage.localeCompare(b.stage),
-      risk: (a, b) => b.risk - a.risk,
       savings: (a, b) => b.costSavings - a.costSavings,
     };
     return r.sort(cmp[sortKey]);
@@ -58,7 +57,6 @@ function UseCasesPage() {
       "stage",
       "status",
       "priority",
-      "risk",
       "owner",
       "annualHoursSaved",
       "costSavings",
@@ -73,7 +71,6 @@ function UseCasesPage() {
           u.stage,
           u.status,
           u.priority,
-          u.risk,
           JSON.stringify(u.useCaseOwner),
           u.annualTimeSaved,
           u.costSavings,

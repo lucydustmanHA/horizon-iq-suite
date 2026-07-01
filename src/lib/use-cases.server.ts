@@ -170,12 +170,16 @@ export const $addComment = createServerFn({ method: "POST" })
 
 /** Create a new use case in Lakebase. */
 export const $createUseCase = createServerFn({ method: "POST" })
-  .validator((data: { title: string; workgroup: string; stage: string; owner: string; description: string }) => data)
+  .validator((data: {
+    title: string; workgroup: string; stage: string; priority?: number;
+    owner: string; businessOwner?: string; businessArea?: string;
+    strategicGoal?: string; grouping?: string; vendor?: string;
+    solutionType?: string; dataSource?: string; description: string;
+  }) => data)
   .handler(async ({ data }) => {
     console.log("[DB] $createUseCase called:", data.title);
     try {
       const db = await getDb();
-      // Generate next sequential ID
       const { rows: lastRow } = await db.query(
         "SELECT use_case_id FROM public.use_cases ORDER BY id DESC LIMIT 1"
       );
@@ -185,13 +189,20 @@ export const $createUseCase = createServerFn({ method: "POST" })
 
       await db.query(
         `INSERT INTO public.use_cases
-           (use_case_id, title, description, workgroup, stage, use_case_owner, created_date, last_modified_date)
-         VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())`,
-        [newId, data.title, data.description, data.workgroup, data.stage, data.owner]
+           (use_case_id, title, description, workgroup, stage, use_case_owner,
+            business_owner, business_area, strategic_goal, grouping, developer,
+            solution_type, data_source, priority, created_date, last_modified_date)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW(),NOW())`,
+        [
+          newId, data.title, data.description ?? "", data.workgroup, data.stage,
+          data.owner ?? "", data.businessOwner ?? "", data.businessArea ?? "",
+          data.strategicGoal ?? "", data.grouping ?? "", data.vendor ?? "",
+          data.solutionType ?? "", data.dataSource ?? "",
+          data.priority ?? null,
+        ]
       );
       const { rows } = await db.query(
-        "SELECT * FROM public.use_cases WHERE use_case_id = $1",
-        [newId]
+        "SELECT * FROM public.use_cases WHERE use_case_id = $1", [newId]
       );
       console.log(`[DB] $createUseCase created ${newId}`);
       return rowToUseCase(rows[0]);
