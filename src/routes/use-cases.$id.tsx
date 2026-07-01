@@ -295,19 +295,56 @@ function DetailPage() {
 
         <TabsContent value="metrics">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <MetricCard label="Time Saved / Month" value={`${useCase.timeSavedPerMonth} hrs`} />
-            <MetricCard label="Annual Time Saved" value={`${useCase.annualTimeSaved.toLocaleString()} hrs`} />
-            <MetricCard label="Cost Savings" value={`$${useCase.costSavings.toLocaleString()}`} />
-            <MetricCard label="Effort Reduction" value={`${useCase.effortBefore} → ${useCase.effortAfter}`} sub={`Δ ${useCase.effortBefore - useCase.effortAfter}`} />
+            <EditableMetricCard label="Time Saved / Month (hrs)" value={useCase.timeSavedPerMonth}
+              onSave={(v) => save({ timeSavedPerMonth: v, annualTimeSaved: v * 12 })} suffix=" hrs" />
+            <EditableMetricCard label="Annual Time Saved (hrs)" value={useCase.annualTimeSaved}
+              onSave={(v) => save({ annualTimeSaved: v })} suffix=" hrs" />
+            <EditableMetricCard label="Cost Savings ($)" value={useCase.costSavings}
+              onSave={(v) => save({ costSavings: v })} prefix="$" />
+            <EditableMetricCard label="Effort Before (1-5)" value={useCase.effortBefore}
+              onSave={(v) => save({ effortBefore: Math.min(5, Math.max(1, v)) as typeof useCase.effortBefore })}
+              sub={`After: ${useCase.effortAfter} · Δ ${useCase.effortBefore - useCase.effortAfter}`} />
           </div>
-          <div className="mt-4">
-            <Panel title="Proactive vs Reactive">
-              <div className="h-3 bg-slate-100 rounded-full overflow-hidden flex">
-                <div className="bg-status-success h-full" style={{ width: `${useCase.proactivePct}%` }} />
-                <div className="bg-status-warning h-full" style={{ width: `${useCase.reactivePct}%` }} />
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Panel title="Effort">
+              <div className="space-y-3">
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-500">Effort Before</span>
+                  <div className="flex items-center gap-1">
+                    {[1,2,3,4,5].map((n) => (
+                      <button key={n} onClick={() => save({ effortBefore: n as typeof useCase.effortBefore })}
+                        className={`size-6 rounded text-[10px] font-bold transition-colors ${n <= useCase.effortBefore ? "bg-accent-indigo text-white" : "bg-slate-100 text-slate-400 hover:bg-accent-indigo/20"}`}>{n}</button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-500">Effort After</span>
+                  <div className="flex items-center gap-1">
+                    {[1,2,3,4,5].map((n) => (
+                      <button key={n} onClick={() => save({ effortAfter: n as typeof useCase.effortAfter })}
+                        className={`size-6 rounded text-[10px] font-bold transition-colors ${n <= useCase.effortAfter ? "bg-status-success text-white" : "bg-slate-100 text-slate-400 hover:bg-status-success/20"}`}>{n}</button>
+                    ))}
+                  </div>
+                </div>
+                <p className="text-xs text-slate-400 pt-1">Reduction: <span className="font-semibold text-status-success">{useCase.effortBefore - useCase.effortAfter} points</span></p>
               </div>
-              <div className="flex justify-between text-xs mt-2 text-slate-600">
-                <span>Proactive {useCase.proactivePct}%</span><span>Reactive {useCase.reactivePct}%</span>
+            </Panel>
+            <Panel title="Proactive vs Reactive (%)">
+              <div className="space-y-2">
+                <div className="flex items-center gap-3 text-sm">
+                  <span className="text-slate-500 w-20 shrink-0">Proactive</span>
+                  <input type="range" min={0} max={100} value={useCase.proactivePct}
+                    onChange={(e) => { const v = Number(e.target.value); save({ proactivePct: v, reactivePct: 100 - v }); }}
+                    className="flex-1 accent-status-success" />
+                  <span className="font-semibold w-10 text-right text-status-success">{useCase.proactivePct}%</span>
+                </div>
+                <div className="h-3 bg-slate-100 rounded-full overflow-hidden flex">
+                  <div className="bg-status-success h-full transition-all" style={{ width: `${useCase.proactivePct}%` }} />
+                  <div className="bg-status-warning h-full transition-all" style={{ width: `${useCase.reactivePct}%` }} />
+                </div>
+                <div className="flex justify-between text-xs text-slate-500">
+                  <span>Proactive {useCase.proactivePct}%</span><span>Reactive {useCase.reactivePct}%</span>
+                </div>
               </div>
             </Panel>
           </div>
@@ -360,4 +397,33 @@ function MetricCard({ label, value, sub }: { label: string; value: string; sub?:
     <p className="text-2xl font-bold text-slate-900">{value}</p>
     {sub && <p className="text-xs text-status-success mt-1 font-medium">{sub}</p>}
   </div>;
+}
+function EditableMetricCard({ label, value, onSave, prefix = "", suffix = "", sub }: {
+  label: string; value: number; onSave: (v: number) => void; prefix?: string; suffix?: string; sub?: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(String(value));
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => { setDraft(String(value)); }, [value]);
+  useEffect(() => { if (editing) ref.current?.select(); }, [editing]);
+  const save = () => {
+    setEditing(false);
+    const n = parseFloat(draft.replace(/[^0-9.]/g, ""));
+    if (!isNaN(n) && n !== value) onSave(n);
+  };
+  const display = prefix + value.toLocaleString() + suffix;
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm cursor-pointer group" onClick={() => !editing && setEditing(true)}>
+      <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">{label}</p>
+      {editing ? (
+        <input ref={ref} autoFocus value={draft} onChange={(e) => setDraft(e.target.value)}
+          onBlur={save} onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") { setEditing(false); setDraft(String(value)); } }}
+          className="text-2xl font-bold text-accent-indigo w-full border-b-2 border-accent-indigo outline-none bg-transparent" />
+      ) : (
+        <p className="text-2xl font-bold text-slate-900 group-hover:text-accent-indigo transition-colors">{display}</p>
+      )}
+      {sub && <p className="text-xs text-status-success mt-1 font-medium">{sub}</p>}
+      {!editing && <p className="text-[10px] text-slate-300 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">click to edit</p>}
+    </div>
+  );
 }
