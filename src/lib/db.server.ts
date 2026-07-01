@@ -17,7 +17,8 @@ let _tokenExpiresAt = 0;
 
 async function generateToken(): Promise<string> {
   // Correct API: POST /api/2.0/postgres/credentials with endpoint in body
-  const url = `${DATABRICKS_HOST}/api/2.0/postgres/credentials`;
+  const host = DATABRICKS_HOST.startsWith("http") ? DATABRICKS_HOST : `https://${DATABRICKS_HOST}`;
+  const url = `${host}/api/2.0/postgres/credentials`;
   console.log(`[DB] Fetching Lakebase credential from ${url}`);
   const res = await fetch(url, {
     method: "POST",
