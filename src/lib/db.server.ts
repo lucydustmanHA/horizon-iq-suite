@@ -1,13 +1,10 @@
 /**
  * db.server.ts — Lakebase connection pool with automatic token refresh.
- * Only runs on the server (TanStack Start server functions).
  */
 import pg from "pg";
 
 const { Pool } = pg;
 
-// Read lazily inside functions — env vars may not be set at module init time
-// in some Nitro bundling scenarios.
 const LAKEBASE_ENDPOINT =
   process.env.LAKEBASE_ENDPOINT ??
   "projects/horizon-ai-innovation/branches/production/endpoints/primary";
@@ -16,13 +13,18 @@ let _pool: pg.Pool | null = null;
 let _tokenExpiresAt = 0;
 
 async function generateToken(): Promise<string> {
+  // Dump all DATABRICKS_* env vars so we know what's injected
+  const dbEnvKeys = Object.keys(process.env).filter(k => k.startsWith("DATABRICKS") || k.startsWith("PG"));
+  console.log("[DB] env keys:", dbEnvKeys.join(", ") || "(none)");
+  for (const k of dbEnvKeys) {
+    const v = process.env[k] ?? "";
+    console.log(`[DB]   ${k} = len=${v.length} prefix=${v.slice(0, 8) || "(empty)"}`);
+  }
+
   const rawHost = process.env.DATABRICKS_HOST ?? "";
   const token   = process.env.DATABRICKS_TOKEN ?? "";
   const host    = rawHost.startsWith("http") ? rawHost : `https://${rawHost}`;
   const url     = `${host}/api/2.0/postgres/credentials`;
-
-  // Debug: log token presence so we can diagnose 401s
-  console.log(`[DB] generateToken host=${rawHost} tokenLen=${token.length} tokenPrefix=${token.slice(0, 6) || "(empty)"}`);
 
   if (!token) {
     throw new Error("[DB] DATABRICKS_TOKEN is empty — cannot generate Lakebase credential");
@@ -46,13 +48,10 @@ async function generateToken(): Promise<string> {
   return data.token;
 }
 
-/** Returns a ready connection pool, recreating it when the token nears expiry. */
 export async function getDb(): Promise<pg.Pool> {
   const now = Date.now();
   if (!_pool || now >= _tokenExpiresAt - 5 * 60 * 1000) {
-    if (_pool) {
-      await _pool.end().catch(() => {});
-    }
+    if (_pool) await _pool.end().catch(() => {});
     const password = await generateToken();
     const user = process.env.PGUSER ?? "";
     console.log(`[DB] Creating pool user=${user}`);
