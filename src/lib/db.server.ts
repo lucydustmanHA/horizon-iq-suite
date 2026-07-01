@@ -1,5 +1,6 @@
 /**
- * db.server.ts — Lakebase connection pool with automatic token refresh.
+ * db.server.ts — Lakebase connection pool using M2M OAuth (client credentials).
+ * DATABRICKS_CLIENT_ID + DATABRICKS_CLIENT_SECRET are auto-injected by Databricks Apps.
  */
 import pg from "pg";
 
@@ -12,57 +13,81 @@ const LAKEBASE_ENDPOINT =
 let _pool: pg.Pool | null = null;
 let _tokenExpiresAt = 0;
 
-async function generateToken(): Promise<string> {
-  // Dump all DATABRICKS_* env vars so we know what's injected
-  const dbEnvKeys = Object.keys(process.env).filter(k => k.startsWith("DATABRICKS") || k.startsWith("PG"));
-  console.log("[DB] env keys:", dbEnvKeys.join(", ") || "(none)");
-  for (const k of dbEnvKeys) {
-    const v = process.env[k] ?? "";
-    console.log(`[DB]   ${k} = len=${v.length} prefix=${v.slice(0, 8) || "(empty)"}`);
+/** Exchange SP client credentials for a short-lived Databricks OAuth token. */
+async function getM2MToken(): Promise<string> {
+  const clientId     = process.env.DATABRICKS_CLIENT_ID ?? "";
+  const clientSecret = process.env.DATABRICKS_CLIENT_SECRET ?? "";
+  const rawHost      = process.env.DATABRICKS_HOST ?? "";
+  const host         = rawHost.startsWith("http") ? rawHost : `https://${rawHost}`;
+
+  console.log(`[DB] M2M token fetch — clientId=${clientId.slice(0, 8)} host=${rawHost}`);
+
+  if (!clientId || !clientSecret) {
+    throw new Error("[DB] DATABRICKS_CLIENT_ID or DATABRICKS_CLIENT_SECRET is empty");
   }
 
-  const rawHost = process.env.DATABRICKS_HOST ?? "";
-  const token   = process.env.DATABRICKS_TOKEN ?? "";
-  const host    = rawHost.startsWith("http") ? rawHost : `https://${rawHost}`;
-  const url     = `${host}/api/2.0/postgres/credentials`;
+  const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+  const res = await fetch(`${host}/oidc/v1/token`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: `Basic ${credentials}`,
+    },
+    body: "grant_type=client_credentials&scope=all-apis",
+  });
 
-  if (!token) {
-    throw new Error("[DB] DATABRICKS_TOKEN is empty — cannot generate Lakebase credential");
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`[DB] M2M token error ${res.status}: ${text}`);
   }
+
+  const { access_token } = (await res.json()) as { access_token: string };
+  console.log("[DB] M2M token obtained");
+  return access_token;
+}
+
+/** Use the M2M token to generate a short-lived Lakebase Postgres credential. */
+async function generateLakebaseToken(): Promise<string> {
+  const m2mToken = await getM2MToken();
+  const rawHost  = process.env.DATABRICKS_HOST ?? "";
+  const host     = rawHost.startsWith("http") ? rawHost : `https://${rawHost}`;
+  const url      = `${host}/api/2.0/postgres/credentials`;
 
   const res = await fetch(url, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${m2mToken}`,
       "Content-Type": "application/json",
-      "X-Databricks-Workspace-Id": "620317033646362",
     },
     body: JSON.stringify({ endpoint: LAKEBASE_ENDPOINT }),
   });
+
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Lakebase credential error ${res.status}: ${text}`);
+    throw new Error(`[DB] Lakebase credential error ${res.status}: ${text}`);
   }
-  const data = (await res.json()) as { token: string };
-  console.log("[DB] Credential obtained successfully");
-  return data.token;
+
+  const { token } = (await res.json()) as { token: string };
+  console.log("[DB] Lakebase credential obtained");
+  return token;
 }
 
+/** Returns a ready pool, recreating it when the token nears expiry (~55 min). */
 export async function getDb(): Promise<pg.Pool> {
   const now = Date.now();
   if (!_pool || now >= _tokenExpiresAt - 5 * 60 * 1000) {
     if (_pool) await _pool.end().catch(() => {});
-    const password = await generateToken();
-    const user = process.env.PGUSER ?? "";
+    const password = await generateLakebaseToken();
+    const user     = process.env.PGUSER ?? "";
     console.log(`[DB] Creating pool user=${user}`);
     _pool = new Pool({
       host:     process.env.PGHOST     ?? "ep-summer-silence-eenujnkm.database.westus2.azuredatabricks.net",
       database: process.env.PGDATABASE ?? "databricks_postgres",
       user,
       password,
-      port: Number(process.env.PGPORT ?? 5432),
-      ssl: { rejectUnauthorized: false },
-      max: 5,
+      port:     Number(process.env.PGPORT ?? 5432),
+      ssl:      { rejectUnauthorized: false },
+      max:      5,
       idleTimeoutMillis: 30_000,
     });
     _tokenExpiresAt = now + 55 * 60 * 1000;

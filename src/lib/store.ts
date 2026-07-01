@@ -31,7 +31,7 @@ function withActivity(uc: UseCase, entry: Omit<ActivityEntry, "id" | "date">): U
 export const usePortfolio = create<PortfolioState>()(
   persist(
     (set) => ({
-      useCases: generateSeedUseCases(),
+      useCases: [],
       loadedAt: Date.now(),
       initialized: false,
       setUseCases: (ucs) =>
@@ -95,7 +95,7 @@ export const usePortfolio = create<PortfolioState>()(
           console.error("[DB] addComment failed:", err)
         );
       },
-      resetSeed: () => set({ useCases: generateSeedUseCases(), loadedAt: Date.now() }),
+      resetSeed: () => set({ useCases: [], loadedAt: Date.now() }),
     }),
     { name: "horizon-qx-portfolio-v1" },
   ),
