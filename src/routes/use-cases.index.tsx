@@ -20,15 +20,18 @@ export const Route = createFileRoute("/use-cases/")({
 
 function UseCasesPage() {
   const useCases = usePortfolio((s) => s.useCases);
-  const [q, setQ] = useState("");
+  const search = Route.useSearch();
+  const [q, setQ] = useState((search as any).q ?? "");
   const [wg, setWg] = useState<string>("all");
   const [stage, setStage] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>((search as any).status ?? "all");
   const [sortKey, setSortKey] = useState<"priority" | "title" | "stage" | "savings">("priority");
 
   const rows = useMemo(() => {
     let r = useCases.filter((u) => {
       if (wg !== "all" && u.workgroup !== wg) return false;
       if (stage !== "all" && u.stage !== stage) return false;
+      if (statusFilter !== "all" && u.status !== statusFilter) return false;
       if (q) {
         const s = q.toLowerCase();
         return (
@@ -47,7 +50,7 @@ function UseCasesPage() {
       savings: (a, b) => b.costSavings - a.costSavings,
     };
     return r.sort(cmp[sortKey]);
-  }, [useCases, q, wg, stage, sortKey]);
+  }, [useCases, q, wg, stage, statusFilter, sortKey]);
 
   function exportCSV() {
     const headers = [
@@ -127,12 +130,19 @@ function UseCasesPage() {
             {STAGES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
           </SelectContent>
         </Select>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="w-48"><SelectValue placeholder="Status" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All statuses</SelectItem>
+            <SelectItem value="Blocked">Blocked</SelectItem>
+            <SelectItem value="Action Needed">Action Needed</SelectItem>
+          </SelectContent>
+        </Select>
         <Select value={sortKey} onValueChange={(v) => setSortKey(v as typeof sortKey)}>
           <SelectTrigger className="w-48"><SelectValue placeholder="Sort by" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="priority">Priority ↓</SelectItem>
-            <SelectItem value="risk">Risk ↓</SelectItem>
-            <SelectItem value="savings">Savings ↓</SelectItem>
+<SelectItem value="savings">Savings ↓</SelectItem>
             <SelectItem value="title">Title A→Z</SelectItem>
             <SelectItem value="stage">Stage A→Z</SelectItem>
           </SelectContent>
@@ -149,7 +159,6 @@ function UseCasesPage() {
                 <th className="px-4 py-3">Stage</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Priority</th>
-                <th className="px-4 py-3">Risk</th>
                 <th className="px-4 py-3">Workgroup</th>
                 <th className="px-4 py-3">Owner</th>
                 <th className="px-4 py-3 text-right">Annual Hrs</th>
@@ -173,7 +182,6 @@ function UseCasesPage() {
                   <td className="px-4 py-3"><StageBadge stage={u.stage} /></td>
                   <td className="px-4 py-3"><StatusBadge status={u.status} /></td>
                   <td className="px-4 py-3"><PriorityBadge priority={u.priority} /></td>
-                  <td className="px-4 py-3"><RiskDot risk={u.risk} /></td>
                   <td className="px-4 py-3 text-xs text-slate-600">{u.workgroup}</td>
                   <td className="px-4 py-3"><OwnerAvatar name={u.useCaseOwner} /></td>
                   <td className="px-4 py-3 text-right text-xs tabular-nums text-slate-700">{u.annualTimeSaved.toLocaleString()}</td>

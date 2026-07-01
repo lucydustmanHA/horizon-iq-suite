@@ -427,3 +427,50 @@ function EditableMetricCard({ label, value, onSave, prefix = "", suffix = "", su
     </div>
   );
 }
+
+function TodoRow({ todo, onToggle, onDelete, onUpdateText, onUpdateAssignee }: {
+  todo: TodoItem;
+  onToggle: () => void;
+  onDelete: () => void;
+  onUpdateText: (v: string) => void;
+  onUpdateAssignee: (v: string) => void;
+}) {
+  const [editingText, setEditingText] = useState(false);
+  const [editingAssignee, setEditingAssignee] = useState(false);
+  const [textDraft, setTextDraft] = useState(todo.text);
+  const [assigneeDraft, setAssigneeDraft] = useState(todo.assignee);
+  useEffect(() => { setTextDraft(todo.text); setAssigneeDraft(todo.assignee); }, [todo.text, todo.assignee]);
+  return (
+    <li className="flex items-start gap-2 group rounded-lg p-2 hover:bg-slate-50 transition-colors">
+      <button onClick={onToggle} className="mt-0.5 shrink-0 text-slate-400 hover:text-accent-indigo transition-colors">
+        {todo.done ? <CheckSquare className="size-4 text-status-success" /> : <Square className="size-4" />}
+      </button>
+      <div className="flex-1 min-w-0">
+        {editingText ? (
+          <input autoFocus value={textDraft} onChange={(e) => setTextDraft(e.target.value)}
+            className="text-sm w-full border-b border-accent-indigo outline-none bg-transparent"
+            onBlur={() => { setEditingText(false); if (textDraft.trim() !== todo.text) onUpdateText(textDraft.trim()); }}
+            onKeyDown={(e) => { if (e.key === "Enter") { setEditingText(false); if (textDraft.trim() !== todo.text) onUpdateText(textDraft.trim()); } if (e.key === "Escape") { setEditingText(false); setTextDraft(todo.text); } }} />
+        ) : (
+          <p className={`text-sm cursor-pointer ${todo.done ? "line-through text-slate-400" : "text-slate-900"}`}
+            onClick={() => setEditingText(true)}>{todo.text || <span className="italic text-slate-300">untitled</span>}</p>
+        )}
+        {editingAssignee ? (
+          <input autoFocus value={assigneeDraft} onChange={(e) => setAssigneeDraft(e.target.value)}
+            placeholder="Assigned to…"
+            className="text-xs w-full border-b border-accent-indigo outline-none bg-transparent text-slate-500 mt-0.5"
+            onBlur={() => { setEditingAssignee(false); if (assigneeDraft !== todo.assignee) onUpdateAssignee(assigneeDraft); }}
+            onKeyDown={(e) => { if (e.key === "Enter") { setEditingAssignee(false); if (assigneeDraft !== todo.assignee) onUpdateAssignee(assigneeDraft); } if (e.key === "Escape") { setEditingAssignee(false); setAssigneeDraft(todo.assignee); } }} />
+        ) : (
+          <p className="text-xs text-slate-400 mt-0.5 cursor-pointer hover:text-accent-indigo"
+            onClick={() => setEditingAssignee(true)}>
+            {todo.assignee ? `→ ${todo.assignee}` : <span className="italic opacity-50">unassigned — click to assign</span>}
+          </p>
+        )}
+      </div>
+      <button onClick={onDelete} className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-status-danger transition-all mt-0.5 shrink-0">
+        <Trash2 className="size-3.5" />
+      </button>
+    </li>
+  );
+}

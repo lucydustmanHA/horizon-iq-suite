@@ -211,3 +211,77 @@ export const $createUseCase = createServerFn({ method: "POST" })
       throw err;
     }
   });
+
+// ─── Todo server functions ────────────────────────────────────────────────
+
+export const $getTodos = createServerFn({ method: "GET" })
+  .validator((data: { useCaseId: string }) => data)
+  .handler(async ({ data }) => {
+    const db = await getDb();
+    const { rows } = await db.query(
+      "SELECT * FROM public.use_case_todos WHERE use_case_id = $1 ORDER BY created_date ASC",
+      [data.useCaseId]
+    );
+    return rows.map((r: Record<string, unknown>) => ({
+      id: String(r.todo_id), useCaseId: String(r.use_case_id),
+      text: String(r.text ?? ""), assignee: String(r.assignee ?? ""),
+      done: Boolean(r.done), createdDate: String(r.created_date ?? ""),
+    }));
+  });
+
+export const $getActionNeededWithTodos = createServerFn({ method: "GET" }).handler(async () => {
+  const db = await getDb();
+  const { rows: ucRows } = await db.query(
+    "SELECT * FROM public.use_cases WHERE status = 'Action Needed' ORDER BY created_date"
+  );
+  const useCases = ucRows.map(rowToUseCase);
+  const ids = useCases.map((u: { id: string }) => u.id);
+  let todos: Array<{id:string;useCaseId:string;text:string;assignee:string;done:boolean;createdDate:string}> = [];
+  if (ids.length > 0) {
+    const placeholders = ids.map((_: string, i: number) => `$${i + 1}`).join(",");
+    const { rows: tRows } = await db.query(
+      `SELECT * FROM public.use_case_todos WHERE use_case_id IN (${placeholders}) ORDER BY created_date ASC`,
+      ids
+    );
+    todos = tRows.map((r: Record<string, unknown>) => ({
+      id: String(r.todo_id), useCaseId: String(r.use_case_id),
+      text: String(r.text ?? ""), assignee: String(r.assignee ?? ""),
+      done: Boolean(r.done), createdDate: String(r.created_date ?? ""),
+    }));
+  }
+  return { useCases, todos };
+});
+
+export const $addTodo = createServerFn({ method: "POST" })
+  .validator((data: { useCaseId: string; text: string; assignee: string }) => data)
+  .handler(async ({ data }) => {
+    const db = await getDb();
+    const { rows } = await db.query(
+      "INSERT INTO public.use_case_todos (use_case_id, text, assignee) VALUES ($1, $2, $3) RETURNING *",
+      [data.useCaseId, data.text, data.assignee ?? ""]
+    );
+    const r = rows[0] as Record<string, unknown>;
+    return { id: String(r.todo_id), useCaseId: String(r.use_case_id), text: String(r.text ?? ""),
+      assignee: String(r.assignee ?? ""), done: Boolean(r.done), createdDate: String(r.created_date ?? "") };
+  });
+
+export const $updateTodo = createServerFn({ method: "POST" })
+  .validator((data: { id: string; text?: string; assignee?: string; done?: boolean }) => data)
+  .handler(async ({ data }) => {
+    const db = await getDb();
+    if (data.text !== undefined)
+      await db.query("UPDATE public.use_case_todos SET text = $1 WHERE todo_id = $2", [data.text, data.id]);
+    if (data.assignee !== undefined)
+      await db.query("UPDATE public.use_case_todos SET assignee = $1 WHERE todo_id = $2", [data.assignee, data.id]);
+    if (data.done !== undefined)
+      await db.query("UPDATE public.use_case_todos SET done = $1 WHERE todo_id = $2", [data.done, data.id]);
+    return { ok: true };
+  });
+
+export const $deleteTodo = createServerFn({ method: "POST" })
+  .validator((data: { id: string }) => data)
+  .handler(async ({ data }) => {
+    const db = await getDb();
+    await db.query("DELETE FROM public.use_case_todos WHERE todo_id = $1", [data.id]);
+    return { ok: true };
+  });

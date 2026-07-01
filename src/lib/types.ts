@@ -1,72 +1,56 @@
-export type Priority = 1 | 2 | 3 | 4 | 5;
+export type Priority = 1 | 2; // 1 = 2026, 2 = 2027+
 export type Complexity = 1 | 2 | 3 | 4 | 5;
-export type Risk = 1 | 2 | 3 | 4 | 5;
 export type Effort = 1 | 2 | 3 | 4 | 5;
 
 export const STAGES = [
-  "Submitted",
-  "Intake",
-  "Discovery",
-  "Development",
-  "Testing & Validation",
-  "Deployment",
-  "Completed",
-  "Archive",
+  "Submitted", "Intake", "Discovery", "Development",
+  "Testing & Validation", "Deployment", "Completed", "Archive",
 ] as const;
 export type Stage = (typeof STAGES)[number];
 
-export const STATUSES = [
-  "Not Started",
-  "In Progress",
-  "Blocked",
-  "On Hold",
-  "Live",
-  "Retired",
-] as const;
+export const STATUSES = ["Blocked", "Action Needed"] as const;
 export type Status = (typeof STATUSES)[number];
 
 export const WORKGROUPS = [
-  "Back Office",
-  "SOC",
-  "Flt Ops",
-  "Inflight",
-  "M&E",
-  "Safety",
-  "Stations",
+  "Back Office", "SOC", "Flt Ops", "Inflight", "M&E", "Safety", "Stations",
 ] as const;
-export type Workgroup = string; // string to accept any DB value
 
-export const CATEGORIES = [
-  "Automation",
-  "Predictive AI",
-  "Generative AI",
-  "Optimization",
-  "Analytics",
-  "Copilot",
+export const BUSINESS_AREAS = [
+  "Airports", "All", "All (including Alaska)", "All SOC", "BI", "CLP", "CPO",
+  "CPO/Inflight", "Catering", "Crew Planning", "Crew Scheduling", "Dispatch",
+  "Dispatch (possibly MTX control)", "Dispatch/CLP",
+  "Dispatch/CLP/Crew Scheduling", "Drug Abatement", "Employee Relations",
+  "Finance", "Flight Ops", "Flight Ops/Dispatch", "Flight Ops/Inflight",
+  "GSE", "HR", "HR BP", "HR Shared Service", "Inflight",
+  "Inflight/Flight Ops", "Labor", "MTX", "MTX Planning", "Materials", "Ops",
+  "Ops Leaders", "Reliability", "SOC", "Safety", "Safety/Audit", "Standards",
+  "Station Leadership", "Stations", "Training", "Training Scheduling",
 ] as const;
-export type Category = (typeof CATEGORIES)[number];
+
+export const STRATEGIC_FOCUSES = [
+  "Financial Durability", "Operational Excellence", "People and Culture", "Safety",
+] as const;
+
+export const GROUPINGS = [
+  "HR Procode", "M&E Procode", "Shareable", "SOC Agent",
+] as const;
+
+export const VENDORS = [
+  "AAG Analytics & Data Science", "AAG ITS", "Buy", "Databricks",
+  "QX Internal - Copilot/Automation Team", "QX Internal - ORA",
+  "System/Software Vendor", "UPLabs", "Use Case Owner and Team",
+] as const;
 
 export const SOLUTION_TYPES = [
-  "Power Automate",
-  "Python Service",
-  "LLM Agent",
-  "Custom App",
-  "Notebook",
-  "Workflow",
+  "Power Automate", "Python Service", "LLM Agent", "Custom App", "Notebook", "Workflow",
 ] as const;
 export type SolutionType = (typeof SOLUTION_TYPES)[number];
 
 export interface ActivityEntry {
   id: string;
-  date: string; // ISO
-  type:
-    | "stage_change"
-    | "status_change"
-    | "owner_change"
-    | "priority_change"
-    | "metric_change"
-    | "created"
-    | "comment";
+  date: string;
+  type: "stage_change" | "status_change" | "owner_change" | "priority_change"
+      | "metric_change" | "created" | "comment";
   message: string;
   actor?: string;
 }
@@ -81,28 +65,24 @@ export interface CommentEntry {
 }
 
 export interface UseCase {
-  id: string; // UC-0001
+  id: string;
   title: string;
   description: string;
 
   workgroup: string;
   businessArea: string;
-  strategicGoal: string;
+  strategicGoal: string;  // maps to strategic_goal in DB; displayed as "Strategic Focus"
   grouping: string;
 
   businessOwner: string;
   useCaseOwner: string;
-  developer: string;
-  technicalLead: string;
+  developer: string;      // maps to developer in DB; displayed as "Vendor"
 
-  category: Category;
-  tags: string[];
-  solutionType: SolutionType;
+  solutionType: string;
   dataSource: string;
 
   complexity: Complexity;
-  risk: Risk;
-  priority: Priority;
+  priority: Priority | null;
 
   status: string;
   stage: Stage;
@@ -111,9 +91,9 @@ export interface UseCase {
   createdDate: string;
   lastModifiedDate: string;
 
-  timeSavedPerMonth: number; // hours
-  annualTimeSaved: number; // hours
-  costSavings: number; // USD
+  timeSavedPerMonth: number;
+  annualTimeSaved: number;
+  costSavings: number;
   effortBefore: Effort;
   effortAfter: Effort;
   proactivePct: number;
@@ -126,10 +106,16 @@ export interface UseCase {
   activity: ActivityEntry[];
 }
 
-export const PRIORITY_LABEL: Record<Priority, string> = {
-  1: "Lowest",
-  2: "Low",
-  3: "Medium",
-  4: "High",
-  5: "Critical",
+export const PRIORITY_LABEL: Record<number, string> = {
+  1: "2026",
+  2: "2027+",
 };
+
+export interface TodoItem {
+  id: string;
+  useCaseId: string;
+  text: string;
+  assignee: string;
+  done: boolean;
+  createdDate: string;
+}

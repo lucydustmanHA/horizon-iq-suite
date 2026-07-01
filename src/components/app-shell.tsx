@@ -188,7 +188,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
           <div className="flex items-center gap-3 shrink-0">
             {actionNeededCount > 0 && (
-              <Link to="/use-cases" search={{ status: "Action Needed" }}
+              <Link to="/action-needed"
                 className="flex items-center gap-1.5 text-xs font-medium text-status-warning bg-amber-50 border border-amber-200 rounded-full px-3 py-1.5 hover:bg-amber-100 transition-colors">
                 <AlertCircle className="size-3.5" />
                 {actionNeededCount} Action Needed
