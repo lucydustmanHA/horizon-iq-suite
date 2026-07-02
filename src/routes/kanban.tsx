@@ -13,7 +13,7 @@ import {
 } from "@dnd-kit/core";
 import { usePortfolio } from "../lib/store";
 import { STAGES, type Stage, WORKGROUPS } from "../lib/types";
-import { PriorityBadge, OwnerAvatar, RiskDot } from "../components/badges";
+import { PriorityBadge, OwnerAvatar, FlagBadge, flagRowClass } from "../components/badges";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import type { UseCase } from "../lib/types";
 
@@ -33,6 +33,7 @@ function KanbanPage() {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const [activeId, setActiveId] = useState<string | null>(null);
   const [wg, setWg] = useState<string>("all");
+  const [viewMode, setViewMode] = useState<"board"|"list">("board");
 
   const filtered = useMemo(
     () => useCases.filter((u) => wg === "all" || u.workgroup === wg),
@@ -68,6 +69,10 @@ function KanbanPage() {
           <h1 className="text-2xl font-bold tracking-tight">Kanban Planner</h1>
           <p className="text-sm text-slate-500 mt-1">Drag cards to move between lifecycle stages.</p>
         </div>
+        <div className="flex gap-2">
+          <button onClick={() => setViewMode("board")} className={"px-3 py-1.5 rounded text-sm font-medium border transition-colors "+(viewMode==="board"?"bg-accent-indigo text-white border-accent-indigo":"text-slate-500 border-slate-200 hover:border-accent-indigo")}>Board</button>
+          <button onClick={() => setViewMode("list")} className={"px-3 py-1.5 rounded text-sm font-medium border transition-colors "+(viewMode==="list"?"bg-accent-indigo text-white border-accent-indigo":"text-slate-500 border-slate-200 hover:border-accent-indigo")}>List</button>
+        </div>
         <Select value={wg} onValueChange={setWg}>
           <SelectTrigger className="w-56"><SelectValue placeholder="Workgroup" /></SelectTrigger>
           <SelectContent>
@@ -77,7 +82,10 @@ function KanbanPage() {
         </Select>
       </header>
 
-      <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
+      {viewMode === "list" ? (
+        <KanbanList byStage={byStage} />
+      ) : null}
+      {viewMode === "board" && <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
         <div className="flex-1 overflow-x-auto">
           <div className="flex gap-4 min-w-max h-full pb-4">
             {STAGES.map((stage) => (
@@ -86,7 +94,44 @@ function KanbanPage() {
           </div>
         </div>
         <DragOverlay>{activeCase ? <Card u={activeCase} dragging /> : null}</DragOverlay>
-      </DndContext>
+      </DndContext>}
+    </div>
+  );
+}
+
+function KanbanList({ byStage }: { byStage: Record<string, import("../lib/types").UseCase[]> }) {
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const toggle = (s: string) => setCollapsed((p) => ({ ...p, [s]: !p[s] }));
+  return (
+    <div className="space-y-2 overflow-y-auto flex-1">
+      {Object.entries(byStage).map(([stage, items]) => (
+        <div key={stage} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+          <button onClick={() => toggle(stage)} className="w-full flex items-center justify-between px-5 py-3 hover:bg-slate-50 transition-colors">
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-semibold text-slate-600 uppercase tracking-widest">{stage}</span>
+              <span className="text-xs font-semibold text-slate-500 bg-slate-100 rounded-full px-2 py-0.5">{items.length}</span>
+            </div>
+            <span className="text-slate-400 text-xs">{collapsed[stage] ? "▸" : "▾"}</span>
+          </button>
+          {!collapsed[stage] && items.length > 0 && (
+            <div className="border-t border-slate-100 divide-y divide-slate-50">
+              {items.map((u) => (
+                <div key={u.id} className={"flex items-center gap-4 px-5 py-3 hover:bg-slate-50 transition-colors " + flagRowClass(u.status)}>
+                  <span className="font-mono text-[11px] text-slate-400 w-20 shrink-0">{u.id}</span>
+                  <Link to="/use-cases/$id" params={{ id: u.id }} className="flex-1 text-sm font-medium text-slate-900 hover:text-accent-indigo truncate">{u.title}</Link>
+                  <FlagBadge status={u.status} />
+                  <PriorityBadge priority={u.priority} />
+                  <span className="text-xs text-slate-500 w-24 shrink-0 truncate">{u.workgroup}</span>
+                  <OwnerAvatar name={u.useCaseOwner} size={22} />
+                </div>
+              ))}
+            </div>
+          )}
+          {!collapsed[stage] && items.length === 0 && (
+            <p className="px-5 py-3 text-xs text-slate-400 italic border-t border-slate-100">Empty</p>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
@@ -149,7 +194,7 @@ function Card({ u, dragging = false }: { u: UseCase; dragging?: boolean }) {
       </div>
       <p className="text-[10px] font-mono text-slate-400 mt-1">{u.id} · {u.workgroup}</p>
       <div className="mt-3 flex items-center justify-between">
-        <RiskDot risk={u.risk} />
+<FlagBadge status={u.status} />
         <OwnerAvatar name={u.useCaseOwner} size={22} />
       </div>
     </div>

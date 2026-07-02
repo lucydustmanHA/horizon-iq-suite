@@ -38,7 +38,8 @@ function rowToUseCase(r: Record<string, unknown>): UseCase {
     lastModifiedDate: r.last_modified_date
       ? new Date(r.last_modified_date as string).toISOString()
       : new Date().toISOString(),
-    timeSavedPerMonth: Number(r.time_saved_per_month) || 0,
+    timeSavedValue: Number(r.time_saved_per_month) || 0,
+    timeSavedUnit: String(r.time_saved_unit || 'month'),
     annualTimeSaved: Number(r.annual_time_saved) || 0,
     costSavings: Number(r.cost_savings) || 0,
     effortBefore: (Number(r.effort_before) || 3) as UseCase["effortBefore"],
@@ -123,7 +124,8 @@ export const $updateUseCase = createServerFn({ method: "POST" })
       priority: "priority",
       status: "status",
       stage: "stage",
-      timeSavedPerMonth: "time_saved_per_month",
+      timeSavedValue: "time_saved_per_month",
+      timeSavedUnit: "time_saved_unit",
       annualTimeSaved: "annual_time_saved",
       costSavings: "cost_savings",
       effortBefore: "effort_before",
@@ -232,7 +234,7 @@ export const $getTodos = createServerFn({ method: "GET" })
 export const $getActionNeededWithTodos = createServerFn({ method: "GET" }).handler(async () => {
   const db = await getDb();
   const { rows: ucRows } = await db.query(
-    "SELECT * FROM public.use_cases WHERE status = 'Action Needed' ORDER BY created_date"
+    "SELECT * FROM public.use_cases WHERE TRIM(LOWER(status)) = 'action needed' OR TRIM(LOWER(status)) = 'blocked' ORDER BY created_date"
   );
   const useCases = ucRows.map(rowToUseCase);
   const ids = useCases.map((u: { id: string }) => u.id);
@@ -256,6 +258,11 @@ export const $addTodo = createServerFn({ method: "POST" })
   .validator((data: { useCaseId: string; text: string; assignee: string }) => data)
   .handler(async ({ data }) => {
     const db = await getDb();
+    // auto-flag use case as Action Needed if not already blocked
+    await db.query(
+      "UPDATE public.use_cases SET status = 'Action Needed' WHERE use_case_id = $1 AND (status IS NULL OR TRIM(status) = '' OR (status != 'Blocked' AND status != 'Action Needed'))",
+      [data.useCaseId]
+    );
     const { rows } = await db.query(
       "INSERT INTO public.use_case_todos (use_case_id, text, assignee) VALUES ($1, $2, $3) RETURNING *",
       [data.useCaseId, data.text, data.assignee ?? ""]
