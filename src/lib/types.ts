@@ -1,7 +1,7 @@
 
 export type Priority = 1 | 2;
 export type Complexity = 1 | 2 | 3 | 4 | 5;
-export type Effort = 1 | 2 | 3 | 4 | 5;
+export type Effort = 0 | 1 | 2 | 3 | 4 | 5; // 0 = not set by user
 
 export const STAGES = [
   "Submitted","Intake","Discovery","Development",
@@ -56,7 +56,11 @@ export interface UseCase {
   timeSavedValue: number; timeSavedUnit: string;
   annualTimeSaved: number; costSavings: number;
   effortBefore: Effort; effortAfter: Effort;
-  proactivePct: number; reactivePct: number;
+  proactivePct: number | null; reactivePct: number | null;
+  liveNonApplicable: boolean;
+  devLeadTimeDays: number | null; resolutionTimeDays: number | null;
+  developmentStartedAt: string | null; lastCompletedAt: string | null; targetEndDate: string | null;
   comments: CommentEntry[]; attachments: string[]; links: string[];
+  notes: string;
   activity: ActivityEntry[];
 }

@@ -2,6 +2,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { usePortfolio } from "../lib/store";
+import { $upsertSettingOption, $removeSettingOption } from "../lib/settings.server";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { Plus, X } from "lucide-react";
@@ -26,6 +27,7 @@ function OptionList({ settingKey, label }: { settingKey: string; label: string }
     const v = draft.trim();
     if (!v || options.includes(v)) return;
     addSettingOption(settingKey, v);
+    $upsertSettingOption({ data: { key: settingKey, value: v } }).catch(console.error);
     setDraft("");
   };
   return (
@@ -35,7 +37,7 @@ function OptionList({ settingKey, label }: { settingKey: string; label: string }
         {options.map((o) => (
           <span key={o} className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 text-slate-700 text-xs font-medium rounded-full group">
             {o}
-            <button onClick={() => removeSettingOption(settingKey, o)} className="text-slate-400 hover:text-status-danger transition-colors opacity-0 group-hover:opacity-100 ml-0.5">
+            <button onClick={() => { removeSettingOption(settingKey, o); $removeSettingOption({ data: { key: settingKey, value: o } }).catch(console.error); }} className="text-slate-400 hover:text-status-danger transition-colors opacity-0 group-hover:opacity-100 ml-0.5">
               <X className="size-3" />
             </button>
           </span>

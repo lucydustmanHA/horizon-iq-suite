@@ -30,7 +30,7 @@ export function PriorityBadge({ priority }: { priority: Priority | null | undefi
 }
 
 /** Flag badge for Blocked / Action Needed */
-export function FlagBadge({ status }: { status: string }) {
+export function FlagBadge({ status }: { status?: string | null }) {
   if (!status || (status !== "Blocked" && status !== "Action Needed")) return null;
   const cls = status === "Blocked"
     ? "bg-red-50 text-red-700 ring-red-200"
@@ -39,7 +39,7 @@ export function FlagBadge({ status }: { status: string }) {
 }
 
 // Keep for backwards compat but hide everywhere
-export function StatusBadge({ status }: { status: string }) {
+export function StatusBadge({ status }: { status?: string | null }) {
   return <FlagBadge status={status} />;
 }
 
@@ -50,7 +50,7 @@ export function RiskDot({ risk }: { risk?: number }) {
 }
 
 export function OwnerAvatar({ name, size = 24 }: { name: string; size?: number }) {
-  const initials = name.split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase();
+  const initials = (name || "").split(" ").map((p) => p[0] || "").filter(Boolean).join("").slice(0, 2).toUpperCase() || "?";
   return (
     <div className="rounded-full bg-slate-200 border border-white text-[10px] font-semibold text-slate-700 grid place-items-center"
       style={{ width: size, height: size }} title={name}>{initials}</div>
@@ -58,7 +58,7 @@ export function OwnerAvatar({ name, size = 24 }: { name: string; size?: number }
 }
 
 /** Row / card highlight class for flagged items */
-export function flagRowClass(status: string) {
+export function flagRowClass(status?: string | null) {
   if (status === "Blocked") return "bg-red-50/40 hover:bg-red-50/70";
   if (status === "Action Needed") return "bg-amber-50/40 hover:bg-amber-50/70";
   return "";

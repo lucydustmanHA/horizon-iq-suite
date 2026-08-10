@@ -7,14 +7,16 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { AppShell } from "../components/app-shell";
 import { Toaster } from "../components/ui/sonner";
 import { usePortfolio } from "../lib/store";
-import { $loadUseCases } from "../lib/use-cases.server";
+import { $loadUseCases, $reportError } from "../lib/use-cases.server";
+import { UserProvider } from "../lib/user-context";
+import { AIChat } from "../components/ai-chat";
 
 function NotFoundComponent() {
   return (
@@ -40,6 +42,7 @@ function NotFoundComponent() {
 
 function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   console.error(error);
+  $reportError({ data: { message: String(error?.message ?? error), stack: String(error?.stack ?? "") } }).catch(() => {});
   const router = useRouter();
   useEffect(() => {
     reportLovableError(error, { boundary: "tanstack_root_error_component" });
@@ -98,10 +101,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "twitter:card", content: "summary_large_image" },
     ],
     links: [
-      {
-        rel: "stylesheet",
-        href: appCss,
-      },
+      { rel: "stylesheet", href: appCss },
+      { rel: "icon", type: "image/svg+xml", href: "/logo.svg" },
+      { rel: "shortcut icon", href: "/logo.svg" },
       { rel: "icon", href: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%234f46e5'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-family='system-ui,sans-serif' font-size='10' font-weight='700' fill='white'%3EHQX%3C/text%3E%3C/svg%3E", type: "image/svg+xml" },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       {
@@ -137,22 +139,61 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
-  const { initialized, setUseCases } = usePortfolio();
+  const [mounted, setMounted] = useState(false);
+  const initialized = usePortfolio((s) => s.initialized);
+  const setUseCases = usePortfolio((s) => s.setUseCases);
+
+  useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
-    if (!initialized) {
+    if (!mounted) return;
+
+    // Fetch fresh data from DB — cached localStorage renders instantly;
+    // this overwrites with live data for cross-user sync.
+    const load = () => {
       $loadUseCases()
         .then(setUseCases)
-        .catch((err) => console.error("[DB] Failed to load use cases:", err));
-    }
-  }, [initialized, setUseCases]);
+        .catch((err) => console.error("[DB] poll load failed:", err));
+    };
+
+    // Initial load with retry
+    const fetchWithRetry = (attempt = 0) => {
+      $loadUseCases()
+        .then(setUseCases)
+        .catch((err) => {
+          console.error(`[DB] load attempt ${attempt + 1} failed:`, err);
+          if (attempt < 2) setTimeout(() => fetchWithRetry(attempt + 1), 1500);
+        });
+    };
+    fetchWithRetry();
+
+    // Poll every 30s for app-wide live sync (pauses when tab hidden)
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") load();
+    }, 30_000);
+
+    return () => clearInterval(interval);
+  }, [mounted, setUseCases]);
+
+  // During SSR, render a minimal shell to avoid hydration errors from
+  // browser-only libraries (@dnd-kit, Zustand persist, etc.)
+  if (!mounted) {
+    return (
+      <QueryClientProvider client={queryClient}>
+        <div id="ssr-placeholder" />
+      </QueryClientProvider>
+    );
+  }
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AppShell>
-        <Outlet />
-      </AppShell>
-      <Toaster />
+      <UserProvider>
+        <AppShell>
+          <Outlet />
+        </AppShell>
+        <Toaster />
+        <AIChat />
+      </UserProvider>
     </QueryClientProvider>
   );
 }

@@ -62,6 +62,7 @@
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
   --color-accent-indigo: var(--accent-indigo);
+  --color-accent-orange: var(--accent-orange);
   --color-status-success: var(--status-success);
   --color-status-warning: var(--status-warning);
   --color-status-danger: var(--status-danger);
@@ -80,9 +81,10 @@
   --popover-foreground: oklch(0.129 0.042 264.695);
   --primary: oklch(0.208 0.042 265.755); /* slate-900-ish, brand-primary */
   --primary-foreground: oklch(0.984 0.003 247.858);
-  --brand: oklch(0.208 0.042 265.755);
-  --brand-foreground: oklch(0.984 0.003 247.858);
-  --accent-indigo: oklch(0.545 0.201 279); /* #4f46e5 */
+  --brand: oklch(0.28 0.07 210); /* Horizon dark teal */
+  --brand-foreground: oklch(0.97 0.01 210);
+  --accent-indigo: oklch(0.635 0.095 205); /* Horizon teal #419dab */
+  --accent-orange: oklch(0.67 0.17 42); /* Horizon orange #ed7438 */
   --status-success: oklch(0.696 0.15 162.5); /* emerald-500 */
   --status-warning: oklch(0.769 0.155 70);   /* amber-500 */
   --status-danger: oklch(0.628 0.222 25);    /* red-500 */
@@ -122,9 +124,9 @@
   --popover-foreground: oklch(0.984 0.003 247.858);
   --primary: oklch(0.929 0.013 255.508);
   --primary-foreground: oklch(0.208 0.042 265.755);
-  --brand: oklch(0.208 0.042 265.755);
-  --brand-foreground: oklch(0.984 0.003 247.858);
-  --accent-indigo: oklch(0.66 0.19 279);
+  --brand: oklch(0.28 0.07 210); /* Horizon dark teal */
+  --brand-foreground: oklch(0.97 0.01 210);
+  --accent-indigo: oklch(0.72 0.095 205); /* Horizon teal */
   --status-success: oklch(0.72 0.15 162.5);
   --status-warning: oklch(0.8 0.155 70);
   --status-danger: oklch(0.68 0.22 25);
@@ -164,4 +166,102 @@
     background-color: var(--color-background);
     color: var(--color-foreground);
   }
+}
+
+/* ── Print / PDF Export ──────────────────────────────────────────────────── */
+@media print {
+  /* Nuclear: hide sidebar and ALL headers/navigation */
+  aside {
+    display: none !important;
+    width: 0 !important;
+    min-width: 0 !important;
+  }
+
+  /* Hide the app-level top header bar (search, flagged, new use case) */
+  header:has(input[placeholder*="Search"]) {
+    display: none !important;
+  }
+
+  /* Fallback: any element with data-no-print or print:hidden class */
+  [data-no-print],
+  .no-print {
+    display: none !important;
+  }
+
+  /* Remove the flex layout that locks the viewport height */
+  body {
+    background: white !important;
+    color: black !important;
+    font-size: 11pt;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  html, body {
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* Break out of the flex h-screen shell */
+  body > div,
+  body > div > div {
+    display: block !important;
+    height: auto !important;
+    overflow: visible !important;
+    width: 100% !important;
+  }
+
+  /* The main content area */
+  main {
+    overflow: visible !important;
+    height: auto !important;
+  }
+
+  main > div {
+    overflow: visible !important;
+  }
+
+  /* Remove shadows */
+  * {
+    box-shadow: none !important;
+  }
+
+  /* Clean page breaks */
+  .break-inside-avoid {
+    break-inside: avoid;
+  }
+
+  /* Report content fills page */
+  .max-w-4xl {
+    max-width: 100% !important;
+  }
+
+  /* Clean table */
+  table {
+    font-size: 10pt;
+  }
+
+  /* Page setup */
+  @page {
+    margin: 0.75in;
+    size: letter portrait;
+  }
+}
+
+/* Celebration confetti animation */
+@keyframes confetti-fall {
+  0% { transform: translateY(0) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+}
+@keyframes bounce-in {
+  0% { transform: scale(0); opacity: 0; }
+  50% { transform: scale(1.1); }
+  70% { transform: scale(0.95); }
+  100% { transform: scale(1); opacity: 1; }
+}
+.animate-confetti {
+  animation: confetti-fall 2.5s ease-in forwards;
+}
+.animate-bounce-in {
+  animation: bounce-in 0.6s ease-out 0.2s both;
 }

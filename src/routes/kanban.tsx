@@ -138,6 +138,20 @@ function KanbanList({ byStage }: { byStage: Record<string, import("../lib/types"
 
 function Column({ stage, items }: { stage: Stage; items: UseCase[] }) {
   const { setNodeRef, isOver } = useDroppable({ id: stage });
+  const [collapsed, setCollapsed] = useState(() => stage === "Submitted" || stage === "Archive");
+  if (collapsed) {
+    return (
+      <div ref={setNodeRef}
+        className="w-10 shrink-0 bg-slate-100/70 rounded-xl flex flex-col items-center py-3 gap-2 cursor-pointer hover:bg-slate-200/60 transition-colors"
+        onClick={() => setCollapsed(false)}
+        title={`${stage} (${items.length})`}
+      >
+        <span className="text-[10px] font-bold text-slate-500 bg-white rounded-full w-6 h-6 flex items-center justify-center border border-slate-200 shrink-0">{items.length}</span>
+        <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest flex-1 flex items-center"
+          style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}>{stage}</span>
+      </div>
+    );
+  }
   return (
     <div
       ref={setNodeRef}
@@ -148,9 +162,11 @@ function Column({ stage, items }: { stage: Stage; items: UseCase[] }) {
     >
       <div className="flex items-center justify-between px-1 pb-3">
         <span className="text-xs font-semibold text-slate-600 uppercase tracking-widest">{stage}</span>
-        <span className="text-xs font-semibold text-slate-500 bg-white rounded-full px-2 py-0.5 border border-slate-200">
-          {items.length}
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs font-semibold text-slate-500 bg-white rounded-full px-2 py-0.5 border border-slate-200">{items.length}</span>
+          <button onClick={(e) => { e.stopPropagation(); setCollapsed(true); }}
+            className="text-slate-300 hover:text-slate-500 text-xs leading-none transition-colors" title="Collapse">◂</button>
+        </div>
       </div>
       <div className="space-y-2 flex-1 overflow-y-auto pr-1">
         {items.map((u) => <DraggableCard key={u.id} u={u} />)}
@@ -177,7 +193,8 @@ function Card({ u, dragging = false }: { u: UseCase; dragging?: boolean }) {
   return (
     <div
       className={
-        "bg-white border border-slate-200 rounded-lg p-3 shadow-sm hover:ring-1 hover:ring-accent-indigo/30 transition " +
+        "border border-slate-200 rounded-lg p-3 shadow-sm hover:ring-1 hover:ring-accent-indigo/30 transition " +
+        (flagRowClass(u.status) || "bg-white") + " " +
         (dragging ? "shadow-lg ring-2 ring-accent-indigo/50 rotate-1" : "")
       }
     >

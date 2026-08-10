@@ -1,6 +1,8 @@
 
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
-import { LayoutDashboard, Table2, KanbanSquare, Sparkles, Search, Plus, AlertCircle, Settings } from "lucide-react";
+import { CelebrationOverlay } from "./celebration";
+import { LayoutDashboard, Table2, KanbanSquare, Sparkles, Search, Plus, AlertCircle, Settings, Rocket, DollarSign, CalendarDays } from "lucide-react";
+
 import { useState, type ReactNode, useEffect } from "react";
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
@@ -10,13 +12,14 @@ import { Textarea } from "./ui/textarea";
 import { usePortfolio } from "../lib/store";
 import { STAGES } from "../lib/types";
 import { $createUseCase } from "../lib/use-cases.server";
-import { $getSettings } from "../lib/settings.server";
+import { $getSettings, $upsertSettingOption, $removeSettingOption } from "../lib/settings.server";
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/use-cases", label: "Use Cases", icon: Table2 },
   { to: "/kanban", label: "Kanban", icon: KanbanSquare },
-  { to: "/insights", label: "Insights", icon: Sparkles },
+  { to: "/calendar", label: "Calendar", icon: CalendarDays },
+  { to: "/live", label: "Live & Delivering", icon: Rocket },
 ] as const;
 
 function CreatableSelect({ value, optKey, onChange, placeholder = "Select…" }: {
@@ -30,7 +33,7 @@ function CreatableSelect({ value, optKey, onChange, placeholder = "Select…" }:
     <div className="flex gap-2">
       <Input autoFocus placeholder="Type custom value…" value={draft} onChange={(e) => setDraft(e.target.value)}
         className="flex-1 h-9 text-sm"
-        onKeyDown={(e) => { if (e.key === "Enter" && draft.trim()) { addSettingOption(optKey, draft.trim()); onChange(draft.trim()); setCustom(false); setDraft(""); } if (e.key === "Escape") { setCustom(false); setDraft(""); } }} />
+        onKeyDown={(e) => { if (e.key === "Enter" && draft.trim()) { addSettingOption(optKey, draft.trim()); $upsertSettingOption({ data: { key: optKey, value: draft.trim() } }).then(() => $getSettings().then(setSettings)).catch(console.error); onChange(draft.trim()); setCustom(false); setDraft(""); } if (e.key === "Escape") { setCustom(false); setDraft(""); } }} />
       <Button size="sm" variant="outline" onClick={() => { setCustom(false); setDraft(""); }}>Cancel</Button>
     </div>
   );
@@ -96,6 +99,7 @@ function NewUseCaseDialog({ open, onClose }: { open: boolean; onClose: () => voi
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={close} disabled={saving}>Cancel</Button>
+            
           <Button className="bg-accent-indigo hover:bg-accent-indigo/90 text-white" onClick={handleSubmit} disabled={saving||!f.title.trim()}>{saving?"Creating…":"Create use case"}</Button>
         </DialogFooter>
       </DialogContent>
@@ -106,13 +110,11 @@ function NewUseCaseDialog({ open, onClose }: { open: boolean; onClose: () => voi
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const [newOpen, setNewOpen] = useState(false);
-  const { setSearchQuery, searchQuery, settingsLoaded, setSettings, actionNeededCount } = usePortfolio((s) => ({
-    setSearchQuery: s.setSearchQuery,
-    searchQuery: s.searchQuery,
-    settingsLoaded: s.settingsLoaded,
-    setSettings: s.setSettings,
-    actionNeededCount: s.useCases.filter((u) => u.status === "Blocked" || u.status === "Action Needed").length,
-  }));
+  const setSearchQuery    = usePortfolio((s) => s.setSearchQuery);
+  const searchQuery       = usePortfolio((s) => s.searchQuery);
+  const settingsLoaded    = usePortfolio((s) => s.settingsLoaded);
+  const setSettings       = usePortfolio((s) => s.setSettings);
+  const actionNeededCount = usePortfolio((s) => s.useCases.filter((u) => u.status === "Blocked" || u.status === "Action Needed").length);
 
   // Load settings once
   useEffect(() => {
@@ -123,20 +125,31 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex h-screen bg-slate-50 font-sans text-slate-900">
-      <aside className="w-64 shrink-0 bg-brand text-brand-foreground flex flex-col">
-        <div className="p-6"><Link to="/" className="flex items-center gap-3"><div className="size-8 rounded-lg bg-accent-indigo grid place-items-center font-bold text-white tracking-tighter text-xs">HQX</div><span className="font-semibold tracking-tight text-lg">Horizon QX</span></Link></div>
+      <aside className="hidden md:flex w-64 shrink-0 bg-brand text-brand-foreground flex-col no-print" data-no-print>
+        <div className="p-6"><Link to="/" className="flex items-center gap-3"><img src="/logo.svg" alt="Horizon AI" className="size-9 rounded-full" /><span className="font-semibold tracking-tight text-lg">Horizon QX</span></Link></div>
         <nav className="flex-1 px-4 space-y-1">
-          {NAV.map(({ to, label: navLabel, icon: Icon }) => {
-            const active = to === "/" ? pathname === "/" : pathname.startsWith(to);
+          {NAV.slice(0, 3).map(({ to, label: navLabel, icon: Icon }) => {
+            const active = to === "/" ? pathname === "/" : to === "/use-cases" ? pathname === "/use-cases" : pathname.startsWith(to);
+            return <Link key={to} to={to} className={"flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors "+(active?"bg-white/10 text-white":"text-slate-400 hover:text-white hover:bg-white/5")}><Icon className="size-4" /><span>{navLabel}</span></Link>;
+          })}
+          <a href="/portfolios" className={"flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors "+(pathname.startsWith("/portfolios")?"bg-white/10 text-white":"text-slate-400 hover:text-white hover:bg-white/5")}>
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="size-4"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg><span>Portfolios</span>
+          </a>
+          {NAV.slice(3).map(({ to, label: navLabel, icon: Icon }) => {
+            const active = to === "/" ? pathname === "/" : to === "/use-cases" ? pathname === "/use-cases" : pathname.startsWith(to);
             return <Link key={to} to={to} className={"flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors "+(active?"bg-white/10 text-white":"text-slate-400 hover:text-white hover:bg-white/5")}><Icon className="size-4" /><span>{navLabel}</span></Link>;
           })}
         </nav>
         <div className="px-4 pb-4">
-          <Link to="/settings" className={"flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors "+(pathname.startsWith("/settings")?"bg-white/10 text-white":"text-slate-400 hover:text-white hover:bg-white/5")}>
+          <a href="/admin" className={"flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors "+(pathname.startsWith("/admin")?"bg-white/10 text-white":"text-slate-300 hover:text-white hover:bg-white/5")}>
+            <DollarSign className="size-4" /><span>Admin</span>
+          </a>
+          <a href="/settings" className={"flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors "+(pathname.startsWith("/settings")?"bg-white/10 text-white":"text-slate-400 hover:text-white hover:bg-white/5")}>
             <Settings className="size-4" /><span>Settings</span>
-          </Link>
+          </a>
         </div>
       </aside>
+      <CelebrationOverlay />
       <main className="flex-1 flex flex-col overflow-hidden">
         <header className="h-16 border-b border-slate-200 bg-white flex items-center justify-between px-8 shrink-0 gap-4">
           <div className="relative w-96 max-w-full">
@@ -147,9 +160,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
           <div className="flex items-center gap-3 shrink-0">
             {actionNeededCount > 0 && (
-              <Link to="/action-needed" className="flex items-center gap-1.5 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-3 py-1.5 hover:bg-amber-100 transition-colors">
+              <a href="/action-needed" className="flex items-center gap-1.5 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-3 py-1.5 hover:bg-amber-100 transition-colors">
                 <AlertCircle className="size-3.5" />{actionNeededCount} flagged
-              </Link>
+              </a>
             )}
             <Button className="bg-accent-indigo hover:bg-accent-indigo/90 text-white gap-1.5" onClick={() => setNewOpen(true)}>
               <Plus className="size-4" />New Use Case

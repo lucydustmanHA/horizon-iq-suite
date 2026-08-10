@@ -3,14 +3,6 @@ command:
   - "-c"
   - "npm install --legacy-peer-deps && NITRO_PRESET=node-server npm run build && node .output/server/index.mjs"
 
-resources:
-  - name: lakebase-token
-    description: "PAT for Lakebase credential generation"
-    secret:
-      scope: horizon-iq-portal
-      key: lakebase-token
-      permission: READ
-
 env:
   - name: PGHOST
     value: "ep-summer-silence-eenujnkm.database.westus2.azuredatabricks.net"
@@ -20,5 +12,4 @@ env:
     value: "5432"
   - name: LAKEBASE_ENDPOINT
     value: "projects/horizon-ai-innovation/branches/production/endpoints/primary"
-  - name: LAKEBASE_PAT
-    valueFrom: lakebase-token
+

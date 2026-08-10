@@ -7,15 +7,28 @@ import { StageBadge, PriorityBadge, FlagBadge, OwnerAvatar, flagRowClass } from 
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { Download, Filter, X } from "lucide-react";
+import { Download, Filter, X, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 
 export const Route = createFileRoute("/use-cases/")({
   validateSearch: (s: Record<string,unknown>) => ({
     q: typeof s.q === "string" ? s.q : "",
     status: typeof s.status === "string" ? s.status : "",
+    stage: typeof s.stage === "string" ? s.stage : "",
   }),
   component: UseCasesPage,
 });
+
+function SortHeader({ label, field, sortKey, sortDir, onSort, className }: { label: string; field: string; sortKey: string; sortDir: string; onSort: (f: string) => void; className?: string }) {
+  const active = sortKey === field;
+  return (
+    <th className={`px-4 py-3 cursor-pointer select-none hover:text-slate-600 transition-colors ${className ?? ""}`} onClick={() => onSort(field)}>
+      <span className="inline-flex items-center gap-1">
+        {label}
+        {active ? (sortDir === "asc" ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />) : <ArrowUpDown className="size-3 opacity-30" />}
+      </span>
+    </th>
+  );
+}
 
 function UseCasesPage() {
   const search = Route.useSearch();
@@ -26,13 +39,16 @@ function UseCasesPage() {
 
   const [q, setQ] = useState(search.q ?? "");
   const [wg, setWg] = useState("all");
-  const [stage, setStage] = useState("all");
-  const [statusFilter, setStatusFilter] = useState(search.status ?? "all");
-  const [sortKey, setSortKey] = useState<"priority"|"title"|"stage"|"savings">("priority");
+  const [grouping, setGrouping] = useState("all");
+  const [stage, setStage] = useState(search.stage || "all");
+  const [statusFilter, setStatusFilter] = useState(search.status || "all");
+  const [sortKey, setSortKey] = useState<"id"|"priority"|"title"|"stage"|"savings"|"workgroup"|"owner"|"hours">("priority");
+  const [sortDir, setSortDir] = useState<"asc"|"desc">("asc");
 
   // Sync URL search param q into local state
   useEffect(() => { if (search.q) setQ(search.q); }, [search.q]);
   useEffect(() => { if (search.status) setStatusFilter(search.status); }, [search.status]);
+  useEffect(() => { if (search.stage) setStage(search.stage); }, [search.stage]);
 
   const activeFilters: {label:string; clear:()=>void}[] = [];
   if (q) activeFilters.push({ label: `"${q}"`, clear: () => { setQ(""); navigate({ search: (s) => ({ ...s, q: "" }) }); } });
@@ -52,14 +68,19 @@ function UseCasesPage() {
       }
       return true;
     });
-    const cmp = {
-      priority: (a: typeof r[0], b: typeof r[0]) => (a.priority ?? 99) - (b.priority ?? 99),
-      title:    (a: typeof r[0], b: typeof r[0]) => a.title.localeCompare(b.title),
-      stage:    (a: typeof r[0], b: typeof r[0]) => a.stage.localeCompare(b.stage),
-      savings:  (a: typeof r[0], b: typeof r[0]) => b.costSavings - a.costSavings,
+    const cmp: Record<string, (a: typeof r[0], b: typeof r[0]) => number> = {
+      id:        (a, b) => a.id.localeCompare(b.id),
+      priority:  (a, b) => (a.priority ?? 99) - (b.priority ?? 99),
+      title:     (a, b) => a.title.localeCompare(b.title),
+      stage:     (a, b) => a.stage.localeCompare(b.stage),
+      workgroup: (a, b) => (a.workgroup ?? "").localeCompare(b.workgroup ?? ""),
+      owner:     (a, b) => (a.useCaseOwner ?? "").localeCompare(b.useCaseOwner ?? ""),
+      hours:     (a, b) => (b.annualTimeSaved ?? 0) - (a.annualTimeSaved ?? 0),
+      savings:   (a, b) => b.costSavings - a.costSavings,
     };
-    return r.sort(cmp[sortKey]);
-  }, [globalFiltered, q, wg, stage, statusFilter, sortKey]);
+    const sorted = r.sort(cmp[sortKey] ?? cmp.priority);
+    return sortDir === "desc" ? sorted.reverse() : sorted;
+  }, [globalFiltered, q, wg, stage, statusFilter, sortKey, sortDir]);
 
   function exportCSV() {
     const headers = ["id","title","workgroup","stage","flag","priority","owner","annualHoursSaved","costSavings"];
@@ -71,7 +92,7 @@ function UseCasesPage() {
   }
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="p-4 md:p-8 space-y-6">
       <header className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Master Use Case Database</h1>
@@ -98,7 +119,7 @@ function UseCasesPage() {
             <SelectContent><SelectItem value="all">All flags</SelectItem><SelectItem value="Blocked">Blocked</SelectItem><SelectItem value="Action Needed">Action Needed</SelectItem></SelectContent>
           </Select>
           <Select value={sortKey} onValueChange={(v) => setSortKey(v as typeof sortKey)}>
-            <SelectTrigger className="w-40"><SelectValue placeholder="Sort" /></SelectTrigger>
+            <SelectTrigger className="w-44"><SelectValue placeholder="Sort" /></SelectTrigger>
             <SelectContent><SelectItem value="priority">Priority ↑</SelectItem><SelectItem value="savings">Savings ↓</SelectItem><SelectItem value="title">Title A→Z</SelectItem><SelectItem value="stage">Stage A→Z</SelectItem></SelectContent>
           </Select>
         </div>
@@ -120,10 +141,14 @@ function UseCasesPage() {
         <div className="overflow-x-auto">
           <table className="w-full text-left">
             <thead><tr className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider border-b border-slate-100 bg-slate-50/50">
-              <th className="px-4 py-3">ID</th><th className="px-4 py-3">Use Case</th><th className="px-4 py-3">Stage</th>
-              <th className="px-4 py-3">Flags</th><th className="px-4 py-3">Priority</th>
-              <th className="px-4 py-3">Workgroup</th><th className="px-4 py-3">Owner</th>
-              <th className="px-4 py-3 text-right">Annual Hrs</th><th className="px-4 py-3 text-right">Cost Savings</th>
+              <SortHeader label="ID" field="id" sortKey={sortKey} sortDir={sortDir} onSort={(f) => { if (sortKey === f) setSortDir(sortDir === "asc" ? "desc" : "asc"); else { setSortKey(f as typeof sortKey); setSortDir("asc"); } }} />
+              <SortHeader label="Use Case" field="title" sortKey={sortKey} sortDir={sortDir} onSort={(f) => { if (sortKey === f) setSortDir(sortDir === "asc" ? "desc" : "asc"); else { setSortKey(f as typeof sortKey); setSortDir("asc"); } }} />
+              <SortHeader label="Stage" field="stage" sortKey={sortKey} sortDir={sortDir} onSort={(f) => { if (sortKey === f) setSortDir(sortDir === "asc" ? "desc" : "asc"); else { setSortKey(f as typeof sortKey); setSortDir("asc"); } }} />
+              <SortHeader label="Priority" field="priority" sortKey={sortKey} sortDir={sortDir} onSort={(f) => { if (sortKey === f) setSortDir(sortDir === "asc" ? "desc" : "asc"); else { setSortKey(f as typeof sortKey); setSortDir("asc"); } }} />
+              <SortHeader label="Workgroup" field="workgroup" sortKey={sortKey} sortDir={sortDir} onSort={(f) => { if (sortKey === f) setSortDir(sortDir === "asc" ? "desc" : "asc"); else { setSortKey(f as typeof sortKey); setSortDir("asc"); } }} />
+              <SortHeader label="Owner" field="owner" sortKey={sortKey} sortDir={sortDir} onSort={(f) => { if (sortKey === f) setSortDir(sortDir === "asc" ? "desc" : "asc"); else { setSortKey(f as typeof sortKey); setSortDir("asc"); } }} />
+              <SortHeader label="Annual Hrs" field="hours" sortKey={sortKey} sortDir={sortDir} onSort={(f) => { if (sortKey === f) setSortDir(sortDir === "asc" ? "desc" : "asc"); else { setSortKey(f as typeof sortKey); setSortDir("asc"); } }} className="text-right" />
+              <SortHeader label="Cost Savings" field="savings" sortKey={sortKey} sortDir={sortDir} onSort={(f) => { if (sortKey === f) setSortDir(sortDir === "asc" ? "desc" : "asc"); else { setSortKey(f as typeof sortKey); setSortDir("asc"); } }} className="text-right" />
             </tr></thead>
             <tbody className="divide-y divide-slate-100">
               {rows.map((u) => (
@@ -131,7 +156,7 @@ function UseCasesPage() {
                   <td className="px-4 py-3 font-mono text-[11px] text-slate-500">{u.id}</td>
                   <td className="px-4 py-3"><Link to="/use-cases/$id" params={{ id: u.id }} className="font-medium text-sm text-slate-900 hover:text-accent-indigo">{u.title}</Link><p className="text-xs text-slate-500 line-clamp-1">{u.description}</p></td>
                   <td className="px-4 py-3"><StageBadge stage={u.stage} /></td>
-                  <td className="px-4 py-3"><FlagBadge status={u.status} /></td>
+                  
                   <td className="px-4 py-3"><PriorityBadge priority={u.priority} /></td>
                   <td className="px-4 py-3 text-xs text-slate-600">{u.workgroup}</td>
                   <td className="px-4 py-3"><OwnerAvatar name={u.useCaseOwner} /></td>

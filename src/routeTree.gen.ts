@@ -9,12 +9,28 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as ActionNeededRouteImport } from './routes/action-needed'
+import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as KanbanRouteImport } from './routes/kanban'
 import { Route as InsightsRouteImport } from './routes/insights'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as UseCasesIndexRouteImport } from './routes/use-cases.index'
 import { Route as UseCasesIdRouteImport } from './routes/use-cases.$id'
+import { Route as LiveIndexRouteImport } from './routes/live.index'
+import { Route as LiveIdRouteImport } from './routes/live.$id'
+import { Route as LiveReviewRouteImport } from './routes/live.review'
+import { Route as LiveReportRouteImport } from './routes/live.report'
 
+const ActionNeededRoute = ActionNeededRouteImport.update({
+  id: '/action-needed',
+  path: '/action-needed',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const KanbanRoute = KanbanRouteImport.update({
   id: '/kanban',
   path: '/kanban',
@@ -40,49 +56,109 @@ const UseCasesIdRoute = UseCasesIdRouteImport.update({
   path: '/use-cases/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LiveIndexRoute = LiveIndexRouteImport.update({
+  id: '/live/',
+  path: '/live/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LiveIdRoute = LiveIdRouteImport.update({
+  id: '/live/$id',
+  path: '/live/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LiveReviewRoute = LiveReviewRouteImport.update({
+  id: '/live/review',
+  path: '/live/review',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LiveReportRoute = LiveReportRouteImport.update({
+  id: '/live/report',
+  path: '/live/report',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PortfoliosIndexRoute = PortfoliosIndexRouteImport.update({
+  id: '/portfolios/',
+  path: '/portfolios/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PortfoliosIdRoute = PortfoliosIdRouteImport.update({
+  id: '/portfolios/$id',
+  path: '/portfolios/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/insights': typeof InsightsRoute
   '/kanban': typeof KanbanRoute
+  '/action-needed': typeof ActionNeededRoute
+  '/settings': typeof SettingsRoute
   '/use-cases/$id': typeof UseCasesIdRoute
   '/use-cases/': typeof UseCasesIndexRoute
+  '/live/': typeof LiveIndexRoute
+  '/live/$id': typeof LiveIdRoute
+  '/live/review': typeof LiveReviewRoute
+  '/live/report': typeof LiveReportRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/insights': typeof InsightsRoute
   '/kanban': typeof KanbanRoute
+  '/action-needed': typeof ActionNeededRoute
+  '/settings': typeof SettingsRoute
   '/use-cases/$id': typeof UseCasesIdRoute
   '/use-cases': typeof UseCasesIndexRoute
+  '/live': typeof LiveIndexRoute
+  '/live/$id': typeof LiveIdRoute
+  '/live/review': typeof LiveReviewRoute
+  '/live/report': typeof LiveReportRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/insights': typeof InsightsRoute
   '/kanban': typeof KanbanRoute
+  '/action-needed': typeof ActionNeededRoute
+  '/settings': typeof SettingsRoute
   '/use-cases/$id': typeof UseCasesIdRoute
   '/use-cases/': typeof UseCasesIndexRoute
+  '/live/': typeof LiveIndexRoute
+  '/live/$id': typeof LiveIdRoute
+  '/live/review': typeof LiveReviewRoute
+  '/live/report': typeof LiveReportRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/insights' | '/kanban' | '/use-cases/$id' | '/use-cases/'
+  fullPaths: '/' | '/insights' | '/kanban' | '/action-needed' | '/settings' | '/use-cases/$id' | '/use-cases/' | '/live/' | '/live/$id' | '/live/review' | '/live/report'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/insights' | '/kanban' | '/use-cases/$id' | '/use-cases'
+  to: '/' | '/insights' | '/kanban' | '/action-needed' | '/settings' | '/use-cases/$id' | '/use-cases' | '/live' | '/live/$id' | '/live/review' | '/live/report'
   id:
     | '__root__'
     | '/'
     | '/insights'
     | '/kanban'
+    | '/action-needed'
+    | '/settings'
     | '/use-cases/$id'
     | '/use-cases/'
+    | '/live/'
+    | '/live/$id'
+    | '/live/review'
+    | '/live/report'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   InsightsRoute: typeof InsightsRoute
   KanbanRoute: typeof KanbanRoute
+  ActionNeededRoute: typeof ActionNeededRoute
+  SettingsRoute: typeof SettingsRoute
   UseCasesIdRoute: typeof UseCasesIdRoute
   UseCasesIndexRoute: typeof UseCasesIndexRoute
+  LiveIndexRoute: typeof LiveIndexRoute
+  LiveIdRoute: typeof LiveIdRoute
+  LiveReviewRoute: typeof LiveReviewRoute
+  LiveReportRoute: typeof LiveReportRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -122,6 +198,62 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof UseCasesIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/live/': {
+      id: '/live/'
+      path: '/live'
+      fullPath: '/live/'
+      preLoaderRoute: typeof LiveIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/live/$id': {
+      id: '/live/$id'
+      path: '/live/$id'
+      fullPath: '/live/$id'
+      preLoaderRoute: typeof LiveIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/live/review': {
+      id: '/live/review'
+      path: '/live/review'
+      fullPath: '/live/review'
+      preLoaderRoute: typeof LiveReviewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/live/report': {
+      id: '/live/report'
+      path: '/live/report'
+      fullPath: '/live/report'
+      preLoaderRoute: typeof LiveReportRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/action-needed': {
+      id: '/action-needed'
+      path: '/action-needed'
+      fullPath: '/action-needed'
+      preLoaderRoute: typeof ActionNeededRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/portfolios/': {
+      id: '/portfolios/'
+      path: '/portfolios'
+      fullPath: '/portfolios/'
+      preLoaderRoute: typeof PortfoliosIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/portfolios/$id': {
+      id: '/portfolios/$id'
+      path: '/portfolios/$id'
+      fullPath: '/portfolios/$id'
+      preLoaderRoute: typeof PortfoliosIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -129,8 +261,14 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   InsightsRoute: InsightsRoute,
   KanbanRoute: KanbanRoute,
+  ActionNeededRoute: ActionNeededRoute,
+  SettingsRoute: SettingsRoute,
   UseCasesIdRoute: UseCasesIdRoute,
   UseCasesIndexRoute: UseCasesIndexRoute,
+  LiveIndexRoute: LiveIndexRoute,
+  LiveIdRoute: LiveIdRoute,
+  LiveReviewRoute: LiveReviewRoute,
+  LiveReportRoute: LiveReportRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

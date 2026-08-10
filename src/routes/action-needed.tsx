@@ -7,6 +7,7 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { CheckSquare, Square, Plus, Trash2, ChevronRight } from "lucide-react";
 import type { TodoItem, UseCase } from "../lib/types";
+import { usePortfolio } from "../lib/store";
 
 export const Route = createFileRoute("/action-needed")({ component: ActionNeededPage });
 
@@ -16,6 +17,7 @@ function ActionNeededPage() {
   const [loaded, setLoaded] = useState(false);
   const [newText, setNewText] = useState<Record<string, string>>({});
   const [newAssignee, setNewAssignee] = useState<Record<string, string>>({});
+  const updateUseCase = usePortfolio((s) => s.updateUseCase);
 
   useEffect(() => {
     $getActionNeededWithTodos().then(({ useCases: ucs, todos }) => {
@@ -37,12 +39,25 @@ function ActionNeededPage() {
     setNewAssignee((p) => ({ ...p, [ucId]: "" }));
   };
   const toggleTodo = async (ucId: string, t: TodoItem) => {
-    setTodosByCase((prev) => ({ ...prev, [ucId]: prev[ucId].map((x) => x.id === t.id ? { ...x, done: !x.done } : x) }));
-    await $updateTodo({ data: { id: t.id, done: !t.done } });
+    const nowDone = !t.done;
+    const updatedTodos = (todosByCase[ucId] ?? []).map((x) => x.id === t.id ? { ...x, done: nowDone } : x);
+    setTodosByCase((prev) => ({ ...prev, [ucId]: updatedTodos }));
+    await $updateTodo({ data: { id: t.id, done: nowDone } });
+    // Auto-remove from flagged list when every todo is checked off
+    if (nowDone && updatedTodos.every((x) => x.done)) {
+      setUseCases((prev) => prev.filter((uc) => uc.id !== ucId));
+      updateUseCase(ucId, { status: "" });
+    }
   };
   const deleteTodo = async (ucId: string, todoId: string) => {
-    setTodosByCase((prev) => ({ ...prev, [ucId]: prev[ucId].filter((x) => x.id !== todoId) }));
+    const remaining = (todosByCase[ucId] ?? []).filter((x) => x.id !== todoId);
+    setTodosByCase((prev) => ({ ...prev, [ucId]: remaining }));
     await $deleteTodo({ data: { id: todoId } });
+    // Auto-remove when no incomplete todos remain (all done or none left)
+    if (remaining.every((x) => x.done)) {
+      setUseCases((prev) => prev.filter((uc) => uc.id !== ucId));
+      updateUseCase(ucId, { status: "" });
+    }
   };
 
   const allTodos = Object.values(todosByCase).flat();

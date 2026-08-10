@@ -1,5 +1,5 @@
 
-import { createServerFn } from "@tanstack/start";
+import { createServerFn } from "@tanstack/react-start";
 import { getDb } from "./db.server";
 
 export const $getSettings = createServerFn({ method: "GET" }).handler(async () => {
@@ -26,7 +26,7 @@ export const $upsertSettingOption = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const db = await getDb();
     await db.query(
-      "INSERT INTO public.app_settings (setting_key, option_value) VALUES ($1,$2) ON CONFLICT DO NOTHING",
+      "INSERT INTO public.app_settings (setting_key, option_value) VALUES ($1,$2) ON CONFLICT (setting_key, option_value) DO NOTHING",
       [data.key, data.value]
     );
     return { ok: true };

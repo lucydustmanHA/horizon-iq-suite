@@ -46,6 +46,18 @@ function isH3SwallowedErrorBody(body: string): boolean {
 
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
+    // Intercept /api/me to return user identity from Databricks forwarded headers
+    const url = new URL(request.url);
+    if (url.pathname === "/api/me") {
+      const email = request.headers.get("x-forwarded-email")
+        || request.headers.get("x-forwarded-preferred-username")
+        || request.headers.get("x-forwarded-user")
+        || "";
+      return new Response(JSON.stringify({ email }), {
+        headers: { "content-type": "application/json" },
+      });
+    }
+
     try {
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);

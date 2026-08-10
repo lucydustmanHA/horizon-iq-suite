@@ -21,16 +21,12 @@ function rowToUseCase(r: Record<string, unknown>): UseCase {
     businessOwner: String(r.business_owner ?? ""),
     useCaseOwner: String(r.use_case_owner ?? ""),
     developer: String(r.developer ?? ""),
-    technicalLead: String(r.technical_lead ?? ""),
-    category: (r.category as UseCase["category"]) ?? "Analytics",
-    tags: Array.isArray(r.tags) ? (r.tags as string[]) : [],
-    solutionType: (r.solution_type as UseCase["solutionType"]) ?? "Custom App",
+    solutionType: String(r.solution_type ?? ""),
     dataSource: String(r.data_source ?? ""),
     complexity: (Number(r.complexity) || 3) as UseCase["complexity"],
-    risk: (Number(r.risk) || 3) as UseCase["risk"],
-    priority: (Number(r.priority) || 2) as UseCase["priority"],
-    status: (r.status as UseCase["status"]) ?? "Not Started",
-    stage: (r.stage as UseCase["stage"]) ?? "Submitted",
+    priority: (r.priority != null ? Number(r.priority) : null) as UseCase["priority"],
+    status: String(r.status ?? ""),
+    stage: (String(r.stage || "Submitted")) as UseCase["stage"],
     currentSection: String(r.current_section ?? ""),
     createdDate: r.created_date
       ? new Date(r.created_date as string).toISOString()
@@ -39,25 +35,31 @@ function rowToUseCase(r: Record<string, unknown>): UseCase {
       ? new Date(r.last_modified_date as string).toISOString()
       : new Date().toISOString(),
     timeSavedValue: Number(r.time_saved_per_month) || 0,
-    timeSavedUnit: String(r.time_saved_unit || 'month'),
+    timeSavedUnit: String(r.time_saved_unit || "month"),
     annualTimeSaved: Number(r.annual_time_saved) || 0,
     costSavings: Number(r.cost_savings) || 0,
-    effortBefore: (Number(r.effort_before) || 3) as UseCase["effortBefore"],
-    effortAfter: (Number(r.effort_after) || 2) as UseCase["effortAfter"],
-    proactivePct: Number(r.proactive_work_pct) || 50,
-    reactivePct: Number(r.reactive_work_pct) || 50,
+    effortBefore: (Number(r.effort_before) || 0) as UseCase["effortBefore"],
+    effortAfter: (Number(r.effort_after) || 0) as UseCase["effortAfter"],
+    proactivePct: r.proactive_work_pct != null ? Number(r.proactive_work_pct) : null,
+    reactivePct: r.reactive_work_pct != null ? Number(r.reactive_work_pct) : null,
+    notes: String(r.notes ?? ""),
+    devLeadTimeDays: r.dev_lead_time_days != null ? Number(r.dev_lead_time_days) : null,
+    resolutionTimeDays: r.resolution_time_days != null ? Number(r.resolution_time_days) : null,
+    developmentStartedAt: r.development_started_at ? (r.development_started_at instanceof Date ? r.development_started_at.toISOString() : String(r.development_started_at)) : null,
+    lastCompletedAt: r.last_completed_at ? (r.last_completed_at instanceof Date ? r.last_completed_at.toISOString() : String(r.last_completed_at)) : null,
+    targetEndDate: r.target_end_date ? (r.target_end_date instanceof Date ? r.target_end_date.toISOString() : String(r.target_end_date)) : null,
     comments: [],
     attachments: [],
     links: r.links ? [String(r.links)] : [],
     activity: [],
-  };
+  } as UseCase;
 }
 
 // ---------------------------------------------------------------------------
 // Server functions
 // ---------------------------------------------------------------------------
 
-/** Load all use cases from Lakebase. */
+/** Load all use cases from Lakebase (including comments from activity log). */
 export const $loadUseCases = createServerFn({ method: "GET" }).handler(
   async (): Promise<UseCase[]> => {
     console.log("[DB] $loadUseCases called");
@@ -66,8 +68,34 @@ export const $loadUseCases = createServerFn({ method: "GET" }).handler(
       const { rows } = await db.query(
         "SELECT * FROM public.use_cases ORDER BY id"
       );
-      console.log(`[DB] Loaded ${rows.length} use cases`);
-      return rows.map(rowToUseCase);
+      // Load all comments from activity log
+      const { rows: commentRows } = await db.query(
+        `SELECT id, use_case_id, new_value AS body, changed_by AS author, changed_at AS date
+         FROM public.use_case_activity
+         WHERE field_changed = 'comment'
+         ORDER BY changed_at ASC`
+      );
+      // Group comments by use_case_id
+      const commentsByUc: Record<string, Array<{ id: string; author: string; date: string; body: string }>> = {};
+      for (const cr of commentRows) {
+        const ucId = String(cr.use_case_id);
+        if (!commentsByUc[ucId]) commentsByUc[ucId] = [];
+        // Normalize old authors: "user" or "You" → show as stored; current users show real name
+        const rawAuthor = String(cr.author ?? "");
+        const author = (rawAuthor === "user" || rawAuthor === "") ? "System" : rawAuthor;
+        commentsByUc[ucId].push({
+          id: String(cr.id),
+          author,
+          date: cr.date ? new Date(cr.date as string).toISOString() : new Date().toISOString(),
+          body: String(cr.body ?? ""),
+        });
+      }
+      console.log(`[DB] Loaded ${rows.length} use cases, ${commentRows.length} comments`);
+      return rows.map((r: Record<string, unknown>) => {
+        const uc = rowToUseCase(r);
+        uc.comments = commentsByUc[uc.id] ?? [];
+        return uc;
+      });
     } catch (err) {
       console.error("[DB] $loadUseCases failed:", err);
       throw err;
@@ -80,12 +108,42 @@ export const $moveStage = createServerFn({ method: "POST" })
   .validator((data: { id: string; from: string; to: string }) => data)
   .handler(async ({ data }) => {
     const db = await getDb();
+    // Base stage update
     await db.query(
       `UPDATE public.use_cases
          SET stage = $1, last_modified_date = NOW()
        WHERE use_case_id = $2`,
       [data.to, data.id]
     );
+    // Auto-set development_started_at when entering Development
+    if (data.to === "Development") {
+      await db.query(
+        `UPDATE public.use_cases
+           SET development_started_at = COALESCE(development_started_at, NOW())
+         WHERE use_case_id = $1`,
+        [data.id]
+      );
+    }
+    // Clear last_completed_at when leaving Completed
+    if (data.from === "Completed" && data.to !== "Completed") {
+      await db.query(
+        `UPDATE public.use_cases SET last_completed_at = NULL WHERE use_case_id = $1`,
+        [data.id]
+      );
+    }
+    // Auto-calculate dev_lead_time_days when reaching Completed
+    if (data.to === "Completed") {
+      await db.query(
+        `UPDATE public.use_cases
+           SET last_completed_at = NOW(),
+               dev_lead_time_days = COALESCE(dev_lead_time_days,
+                 CASE WHEN development_started_at IS NOT NULL
+                   THEN EXTRACT(DAY FROM NOW() - development_started_at)::int
+                   ELSE NULL END)
+         WHERE use_case_id = $1`,
+        [data.id]
+      );
+    }
     await db.query(
       `INSERT INTO public.use_case_activity
          (use_case_id, field_changed, old_value, new_value, changed_by)
@@ -126,6 +184,12 @@ export const $updateUseCase = createServerFn({ method: "POST" })
       stage: "stage",
       timeSavedValue: "time_saved_per_month",
       timeSavedUnit: "time_saved_unit",
+      notes: "notes",
+      devLeadTimeDays: "dev_lead_time_days",
+      resolutionTimeDays: "resolution_time_days",
+      developmentStartedAt: "development_started_at",
+      lastCompletedAt: "last_completed_at",
+    targetEndDate: "target_end_date",
       annualTimeSaved: "annual_time_saved",
       costSavings: "cost_savings",
       effortBefore: "effort_before",
@@ -138,7 +202,7 @@ export const $updateUseCase = createServerFn({ method: "POST" })
 
     for (const [key, col] of Object.entries(map)) {
       if (key in patch) {
-        fields.push(`${col} = ${i++}`);
+        fields.push(`${col} = $${i++}`);
         values.push((patch as Record<string, unknown>)[key]);
       }
     }
@@ -147,26 +211,54 @@ export const $updateUseCase = createServerFn({ method: "POST" })
     fields.push(`last_modified_date = NOW()`);
     values.push(id);
     await db.query(
-      `UPDATE public.use_cases SET ${fields.join(", ")} WHERE use_case_id = ${i}`,
+      `UPDATE public.use_cases SET ${fields.join(", ")} WHERE use_case_id = $${i}`,
       values
     );
   });
 
-/** Add a comment to a use case. */
+/** Load comments for a single use case (for real-time refresh on detail page). */
+export const $loadComments = createServerFn({ method: "GET" })
+  .validator((data: { useCaseId: string }) => data)
+  .handler(async ({ data }) => {
+    const db = await getDb();
+    const { rows } = await db.query(
+      `SELECT id, new_value AS body, changed_by AS author, changed_at AS date
+       FROM public.use_case_activity
+       WHERE use_case_id = $1 AND field_changed = 'comment'
+       ORDER BY changed_at ASC`,
+      [data.useCaseId]
+    );
+    return rows.map((r: Record<string, unknown>) => ({
+      id: String(r.id),
+      author: (String(r.author ?? "") === "user" || String(r.author ?? "") === "") ? "System" : String(r.author ?? ""),
+      date: r.date ? new Date(r.date as string).toISOString() : new Date().toISOString(),
+      body: String(r.body ?? ""),
+    }));
+  });
+
+/** Add a comment to a use case. Returns the new comment with DB-generated ID. */
 export const $addComment = createServerFn({ method: "POST" })
   .validator((data: { id: string; body: string; author: string }) => data)
   .handler(async ({ data }) => {
     const db = await getDb();
-    await db.query(
+    const { rows } = await db.query(
       `INSERT INTO public.use_case_activity
          (use_case_id, field_changed, new_value, changed_by, note)
-       VALUES ($1, $2, $3, $4, $5)`,
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, changed_at`,
       [data.id, "comment", data.body, data.author, data.body]
     );
     await db.query(
       `UPDATE public.use_cases SET last_modified_date = NOW() WHERE use_case_id = $1`,
       [data.id]
     );
+    const row = rows[0] as Record<string, unknown>;
+    return {
+      id: String(row.id),
+      author: data.author,
+      date: row.changed_at ? new Date(row.changed_at as string).toISOString() : new Date().toISOString(),
+      body: data.body,
+    };
   });
 
 
@@ -255,7 +347,7 @@ export const $getActionNeededWithTodos = createServerFn({ method: "GET" }).handl
 });
 
 export const $addTodo = createServerFn({ method: "POST" })
-  .validator((data: { useCaseId: string; text: string; assignee: string }) => data)
+  .validator((data: { useCaseId: string; text: string; assignee: string; createdBy?: string }) => data)
   .handler(async ({ data }) => {
     const db = await getDb();
     // auto-flag use case as Action Needed if not already blocked
@@ -264,8 +356,8 @@ export const $addTodo = createServerFn({ method: "POST" })
       [data.useCaseId]
     );
     const { rows } = await db.query(
-      "INSERT INTO public.use_case_todos (use_case_id, text, assignee) VALUES ($1, $2, $3) RETURNING *",
-      [data.useCaseId, data.text, data.assignee ?? ""]
+      "INSERT INTO public.use_case_todos (use_case_id, text, assignee, created_by) VALUES ($1, $2, $3, $4) RETURNING *",
+      [data.useCaseId, data.text, data.assignee ?? "", data.createdBy ?? ""]
     );
     const r = rows[0] as Record<string, unknown>;
     return { id: String(r.todo_id), useCaseId: String(r.use_case_id), text: String(r.text ?? ""),
@@ -280,8 +372,21 @@ export const $updateTodo = createServerFn({ method: "POST" })
       await db.query("UPDATE public.use_case_todos SET text = $1 WHERE todo_id = $2", [data.text, data.id]);
     if (data.assignee !== undefined)
       await db.query("UPDATE public.use_case_todos SET assignee = $1 WHERE todo_id = $2", [data.assignee, data.id]);
-    if (data.done !== undefined)
+    if (data.done !== undefined) {
       await db.query("UPDATE public.use_case_todos SET done = $1 WHERE todo_id = $2", [data.done, data.id]);
+      if (data.done) {
+        // Auto-clear "Action Needed" when every todo for this use case is now done
+        await db.query(`
+          UPDATE public.use_cases SET status = ''
+          WHERE use_case_id = (SELECT use_case_id FROM public.use_case_todos WHERE todo_id = $1)
+            AND TRIM(status) = 'Action Needed'
+            AND NOT EXISTS (
+              SELECT 1 FROM public.use_case_todos t2
+              WHERE t2.use_case_id = (SELECT use_case_id FROM public.use_case_todos WHERE todo_id = $1)
+                AND t2.done = false
+            )`, [data.id]);
+      }
+    }
     return { ok: true };
   });
 
@@ -289,6 +394,54 @@ export const $deleteTodo = createServerFn({ method: "POST" })
   .validator((data: { id: string }) => data)
   .handler(async ({ data }) => {
     const db = await getDb();
+    const ucRes = await db.query("SELECT use_case_id FROM public.use_case_todos WHERE todo_id = $1", [data.id]);
+    const useCaseId = ucRes.rows[0]?.use_case_id;
     await db.query("DELETE FROM public.use_case_todos WHERE todo_id = $1", [data.id]);
+    if (useCaseId) {
+      // Auto-clear "Action Needed" if no incomplete todos remain
+      await db.query(`
+        UPDATE public.use_cases SET status = ''
+        WHERE use_case_id = $1
+          AND TRIM(status) = 'Action Needed'
+          AND NOT EXISTS (
+            SELECT 1 FROM public.use_case_todos WHERE use_case_id = $1 AND done = false
+          )`, [useCaseId]);
+    }
     return { ok: true };
+  });
+
+/** Save notes for a use case */
+export const $saveNotes = createServerFn({ method: "POST" })
+  .validator((data: { id: string; notes: string }) => data)
+  .handler(async ({ data }) => {
+    const db = await getDb();
+    await db.query("UPDATE public.use_cases SET notes=$1 WHERE use_case_id=$2", [data.notes, data.id]);
+    return { ok: true };
+  });
+
+/** Permanently delete a use case and all its todos */
+export const $deleteUseCase = createServerFn({ method: "POST" })
+  .validator((data: { id: string }) => data)
+  .handler(async ({ data }) => {
+    const db = await getDb();
+    await db.query("DELETE FROM public.use_case_todos WHERE use_case_id=$1", [data.id]);
+    await db.query("DELETE FROM public.use_cases WHERE use_case_id=$1", [data.id]);
+    return { ok: true };
+  });
+
+/** Diagnostic: log client-side errors in server logs */
+export const $reportError = createServerFn({ method: "POST" })
+  .validator((data: { message: string; stack: string }) => data)
+  .handler(async ({ data }) => {
+    console.error("[CLIENT ERROR]", data.message);
+    console.error("[CLIENT STACK]", data.stack);
+    return { ok: true };
+  });
+
+
+export const $deleteActivity = createServerFn({ method: "POST" })
+  .validator((data: { id: string; activityId: string }) => data)
+  .handler(async ({ data }) => {
+    const db = await getDb();
+    await db.query("DELETE FROM public.use_case_activity WHERE id = " + "$1 AND use_case_id = " + "$2", [data.activityId, data.id]);
   });
