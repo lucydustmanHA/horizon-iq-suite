@@ -124,10 +124,11 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
   }, [settingsLoaded, setSettings]);
 
+  const APP_TITLE = "QX Business Transformation App";
   return (
     <div className="flex h-screen bg-slate-50 font-sans text-slate-900">
       <aside className="hidden md:flex w-64 shrink-0 bg-brand text-brand-foreground flex-col no-print" data-no-print>
-        <div className="p-6 pb-4"><Link to="/" className="flex items-center gap-3"><img src="/logo.svg" alt="Horizon AI" className="size-9 rounded-full" /><span className="leading-tight"><span className="block font-semibold tracking-tight text-lg">{usePortfolio((s) => s.appName ?? "Horizon QX")}</span><span className="block text-[11px] text-slate-400 font-medium">Business Transformation</span></span></Link></div>
+        <div className="p-6 pb-4"><Link to="/" className="flex items-center gap-3"><img src="/logo.svg" alt="Horizon AI" className="size-9 rounded-full" /><span className="leading-tight"><span className="block font-semibold tracking-tight text-base text-white">{APP_TITLE}</span></span></Link></div>
         <SideSwitcher current="ai" />
         <nav className="flex-1 px-4 space-y-1">
           {NAV.slice(0, 3).map(({ to, label: navLabel, icon: Icon }) => {

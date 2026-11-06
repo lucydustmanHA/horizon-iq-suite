@@ -12,7 +12,7 @@ import { CostsPanel } from "../components/costs-panel";
 import { STRATEGY_DEFAULTS, STRATEGY_SETTING_KEYS } from "../lib/strategy-types";
 
 const TABS = [
-  { key: "general", label: "General", icon: SlidersHorizontal, desc: "App name and appearance for everyone." },
+  { key: "general", label: "General", icon: SlidersHorizontal, desc: "Appearance for everyone." },
   { key: "ai", label: "AI & Automation", icon: Sparkles, desc: "Dropdown options used on use cases. Changes apply everywhere immediately." },
   { key: "strategy", label: "Strategy", icon: Target, desc: "Departments, priorities, plan years, and deep-dive areas used across Strategy." },
   { key: "costs", label: "Costs & Usage", icon: DollarSign, desc: "What it costs to run this app on Databricks." },
@@ -273,7 +273,8 @@ function SettingsPage() {
             <h2 className="text-base font-semibold text-slate-900">{current.label}</h2>
             <p className="text-xs text-slate-500 mt-0.5">{current.desc}</p>
           </div>
-          {tab === "general" && (<><AppNamePicker /><DarkModeToggle /></>)}
+          {/* App name is now fixed to "QX Business Transformation App" in the sidebar, so the name picker is hidden. */}
+          {tab === "general" && (<><DarkModeToggle /></>)}
           {tab === "ai" && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {SECTIONS.map((s) => <OptionList key={s.key} settingKey={s.key} label={s.label} />)}

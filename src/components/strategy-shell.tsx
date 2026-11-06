@@ -28,7 +28,6 @@ const linkCls = (active: boolean) =>
 export function StrategyShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
-  const appName = usePortfolio((s) => s.appName ?? "Horizon QX");
   const settingsLoaded = usePortfolio((s) => s.settingsLoaded);
   const setSettings = usePortfolio((s) => s.setSettings);
   const { year, setYear, search, setSearch } = useStrategyUI();
@@ -51,8 +50,7 @@ export function StrategyShell({ children }: { children: ReactNode }) {
           <Link to="/strategy" className="flex items-center gap-3">
             <img src="/logo.svg" alt="Horizon" className="size-9 rounded-full" />
             <span className="leading-tight">
-              <span className="block font-semibold tracking-tight text-lg">{appName}</span>
-              <span className="block text-[11px] text-slate-400 font-medium">Business Transformation</span>
+              <span className="block font-semibold tracking-tight text-base text-white">QX Business Transformation App</span>
             </span>
           </Link>
         </div>
