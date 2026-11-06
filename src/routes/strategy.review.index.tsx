@@ -3,7 +3,7 @@ import { Play, FileText, Presentation } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { useStrategyUI, useStrategyOptions, useReviewGoals, useReviews, validateReviewSearch, type ReviewSearch } from "../lib/strategy-hooks";
-import { MONTHS, goalStatus, offTrackStreak, monthKey, formatMonthKey, defaultReviewMonth, type StrategyGoal } from "../lib/strategy-types";
+import { MONTHS, goalStatus, offTrackStreak, monthKey, formatMonthKey, defaultReviewMonth, reviewSlideKeys, initiativeNeedsAttention, type StrategyGoal } from "../lib/strategy-types";
 import { PageHeader, Card, KpiTile, EmptyState, StatusPill, PriorityTag, LoadError } from "../components/strategy/ui";
 
 export const Route = createFileRoute("/strategy/review/")({
@@ -18,11 +18,14 @@ function ReviewHome() {
   const year = useStrategyUI((s) => s.year);
   const month = search.month && search.month.startsWith(String(year)) ? search.month : defaultReviewMonth(year);
   const { departments } = useStrategyOptions();
-  const { goals, isLoading, error } = useReviewGoals(search.dept);
+  const { goals, data, isLoading, error } = useReviewGoals(search.dept);
   const { data: reviews = [] } = useReviews(month);
   const byGoal = new Map(reviews.map((r) => [r.goalId, r]));
-  // One slide per department, in review order
-  const slideDepts = Array.from(new Set(goals.map((g) => g.department)));
+  // One slide per department (goals + business initiatives), in review order
+  const initiatives = data?.initiatives ?? [];
+  const slideDepts = reviewSlideKeys(goals, initiatives, search.dept);
+  const reviewInits = search.dept ? initiatives.filter((i) => i.department === search.dept) : initiatives;
+  const initsAttention = reviewInits.filter((i) => initiativeNeedsAttention(i)).length;
   const slideOf = (g: StrategyGoal) => Math.max(0, slideDepts.indexOf(g.department));
   const on = goals.filter((g) => goalStatus(g) === "On track").length;
   const off = goals.filter((g) => goalStatus(g) === "Off track").length;
@@ -36,8 +39,8 @@ function ReviewHome() {
     <div className="p-8 space-y-5">
       <PageHeader title="Leadership Review" subtitle={`Monthly goal review · ${formatMonthKey(month)}${search.dept ? ` · ${search.dept}` : ""}`}
         actions={<>
-          <Button variant="outline" className="gap-1.5" onClick={() => go("/strategy/review/report")} disabled={!goals.length}><FileText className="size-4" />Report / PDF</Button>
-          <Button className="bg-accent-indigo hover:bg-accent-indigo/90 text-white gap-1.5" onClick={() => go("/strategy/review/present")} disabled={!goals.length}><Play className="size-4" />Start review</Button>
+          <Button variant="outline" className="gap-1.5" onClick={() => go("/strategy/review/report")} disabled={!slideDepts.length}><FileText className="size-4" />Report / PDF</Button>
+          <Button className="bg-accent-indigo hover:bg-accent-indigo/90 text-white gap-1.5" onClick={() => go("/strategy/review/present")} disabled={!slideDepts.length}><Play className="size-4" />Start review</Button>
         </>} />
 
       <div className="flex flex-wrap items-center gap-2">
@@ -52,7 +55,7 @@ function ReviewHome() {
       </div>
 
       <section className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <KpiTile label="Slides" value={slideDepts.length} sub={`${goals.length} goals · one slide per department`} />
+        <KpiTile label="Slides" value={slideDepts.length} sub={`${goals.length} goals · ${reviewInits.length} initiatives${initsAttention ? ` (${initsAttention} at risk/overdue)` : ""}`} />
         <KpiTile label="On track" value={on} accent="border-l-4 border-l-emerald-400" />
         <KpiTile label="Off track" value={off} accent="border-l-4 border-l-red-400" />
         <KpiTile label="Needs attention" value={attention} sub="Off track 2+ months" accent="border-l-4 border-l-amber-400" />
@@ -60,7 +63,7 @@ function ReviewHome() {
 
       <Card bodyClassName="overflow-x-auto">
         {!isLoading && goals.length === 0 ? (
-          <EmptyState icon={<Presentation className="size-5" />} title="No goals to review" body={`Add FY${year} goals first, then walk through them here each month.`} />
+          <EmptyState icon={<Presentation className="size-5" />} title={reviewInits.length ? "No goals — initiatives only" : "No goals to review"} body={`Add FY${year} goals first, then walk through them here each month.`} />
         ) : (
           <table className="w-full text-sm min-w-[860px]">
             <thead className="bg-slate-50 text-[11px] text-slate-500 uppercase tracking-wide">

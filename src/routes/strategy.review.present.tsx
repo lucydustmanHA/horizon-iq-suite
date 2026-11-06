@@ -1,18 +1,20 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { X, ChevronLeft, ChevronRight, FileText, Maximize2, StickyNote } from "lucide-react";
+import { X, ChevronLeft, ChevronRight, FileText, Maximize2, StickyNote, Rocket } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { toast } from "sonner";
 import { Button } from "../components/ui/button";
 import { Textarea } from "../components/ui/textarea";
 import {
-  useStrategyUI, useReviewGoals, useReviews, useSaveProgress, useSaveMonthMeta, validateReviewSearch, strategyKeys,
+  useStrategyUI, useReviewGoals, useReviews, useSaveProgress, useSaveMonthMeta, validateReviewSearch, strategyKeys, useRefreshStrategy,
 } from "../lib/strategy-hooks";
 import {
   goalStatus, offTrackStreak, formatMonthKey, defaultReviewMonth, MONTHS,
-  type StrategyGoal, type StrategyReview, type StrategyActivity,
+  reviewSlideKeys, initiativesForSlide, initiativeNeedsAttention, INITIATIVE_STATUSES, fmtDate,
+  type StrategyGoal, type StrategyReview, type StrategyActivity, type StrategyInitiative,
 } from "../lib/strategy-types";
-import { $saveStrategyReview } from "../lib/strategy.server";
+import { $saveStrategyReview, $saveInitiative } from "../lib/strategy.server";
 import { StatusPill, PriorityTag, MonthStrip, TrendChart, type MonthMeta } from "../components/strategy/ui";
 import { ActivitiesPanel } from "../components/strategy/activities";
 
@@ -33,10 +35,12 @@ function ReviewPresent() {
   const { data: reviews = [] } = useReviews(month);
   const saveProgress = useSaveProgress();
   const saveMeta = useSaveMonthMeta();
-  const depts = useMemo(() => Array.from(new Set(goals.map((g) => g.department))), [goals]);
+  const initiatives = data?.initiatives ?? [];
+  const depts = useMemo(() => reviewSlideKeys(goals, initiatives, search.dept), [goals, initiatives, search.dept]);
   const idx = Math.min(search.i ?? 0, Math.max(depts.length - 1, 0));
   const dept = depts[idx];
   const slideGoals = goals.filter((g) => g.department === dept);
+  const slideInits = dept ? initiativesForSlide(initiatives, dept) : [];
   const [detailId, setDetailId] = useState<string | null>(null);
   const detail = detailId ? goals.find((g) => g.id === detailId) ?? null : null;
   useEffect(() => { setDetailId(null); }, [dept]);
@@ -62,7 +66,7 @@ function ReviewPresent() {
   if (isLoading) return <div className="fixed inset-0 z-50 bg-slate-50 flex items-center justify-center text-sm text-slate-400">Loading review…</div>;
   if (!dept) return (
     <div className="fixed inset-0 z-50 bg-slate-50 flex flex-col items-center justify-center gap-3">
-      <p className="text-slate-500">No goals to review for {formatMonthKey(month)}.</p>
+      <p className="text-slate-500">No goals or initiatives to review for {formatMonthKey(month)}.</p>
       <Button variant="outline" onClick={() => exit()}>Back to Leadership Review</Button>
     </div>
   );
@@ -93,16 +97,23 @@ function ReviewPresent() {
           <div className="flex flex-wrap items-end justify-between gap-2">
             <div>
               <h1 className="text-2xl font-bold tracking-tight">{dept}</h1>
-              <p className="text-sm text-slate-500">{slideGoals.length} goals · {onCount} on track · {offCount} off track · {MONTHS[monthIdx]} actuals</p>
+              <p className="text-sm text-slate-500">
+                {slideGoals.length > 0 && <>{slideGoals.length} goals · {onCount} on track · {offCount} off track · {MONTHS[monthIdx]} actuals</>}
+                {slideGoals.length > 0 && slideInits.length > 0 && " · "}
+                {slideInits.length > 0 && <>{slideInits.length} initiative{slideInits.length === 1 ? "" : "s"}</>}
+              </p>
             </div>
-            <p className="text-[11px] text-slate-400">Click a month to update it live · ⋯ to comment · More detail for trend, activities &amp; notes</p>
+            {slideGoals.length > 0 && <p className="text-[11px] text-slate-400">Click a month to update it live · ⋯ to comment · More detail for trend, activities &amp; notes</p>}
           </div>
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-            {slideGoals.map((g) => (
-              <GoalSlideCard key={g.id} goal={g} monthIdx={monthIdx} hasNotes={!!reviewOf(g.id)?.meetingNotes}
-                onOpen={() => setDetailId(g.id)} onEdit={(i, v) => saveProgress(g, i, v)} onMeta={(i, m) => saveMeta(g, i, m)} />
-            ))}
-          </div>
+          {slideGoals.length > 0 && (
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+              {slideGoals.map((g) => (
+                <GoalSlideCard key={g.id} goal={g} monthIdx={monthIdx} hasNotes={!!reviewOf(g.id)?.meetingNotes}
+                  onOpen={() => setDetailId(g.id)} onEdit={(i, v) => saveProgress(g, i, v)} onMeta={(i, m) => saveMeta(g, i, m)} />
+              ))}
+            </div>
+          )}
+          {slideInits.length > 0 && <InitiativesSection items={slideInits} />}
         </div>
       </div>
 
@@ -119,6 +130,72 @@ function ReviewPresent() {
           onClose={() => setDetailId(null)} onEdit={(i, v) => saveProgress(detail, i, v)} onMeta={(i, m) => saveMeta(detail, i, m)} />
       )}
     </div>
+  );
+}
+
+const INIT_PILL: Record<string, string> = {
+  Planned: "bg-slate-100 text-slate-600 ring-slate-200",
+  Active: "bg-teal-50 text-teal-700 ring-teal-200",
+  "At risk": "bg-amber-50 text-amber-700 ring-amber-200",
+  Complete: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+};
+
+/** Business initiatives for the current slide — status and latest update are editable live. */
+function InitiativesSection({ items }: { items: StrategyInitiative[] }) {
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <div className="px-4 pt-3 pb-2 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-semibold text-slate-700 flex items-center gap-1.5"><Rocket className="size-4 text-accent-indigo" />Business initiatives ({items.length})</p>
+        <p className="text-[11px] text-slate-400">Change a status or type an update — it saves automatically</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm min-w-[820px]">
+          <thead className="bg-slate-50 text-[10px] text-slate-500 uppercase tracking-wide">
+            <tr>
+              <th className="px-4 py-2 text-left w-[30%]">Initiative</th>
+              <th className="px-3 py-2 text-left">Owner</th>
+              <th className="px-3 py-2 text-left">Target date</th>
+              <th className="px-3 py-2 text-left w-36">Status</th>
+              <th className="px-3 py-2 text-left w-[34%]">Latest update</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {items.map((i) => <InitiativeRow key={i.id} item={i} />)}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function InitiativeRow({ item }: { item: StrategyInitiative }) {
+  const refresh = useRefreshStrategy();
+  const [notes, setNotes] = useState(item.progressNotes ?? "");
+  const [status, setStatus] = useState(item.status);
+  useEffect(() => { setNotes(item.progressNotes ?? ""); setStatus(item.status); }, [item.id, item.progressNotes, item.status]);
+  const save = async (patch: Partial<StrategyInitiative>) => {
+    try { await $saveInitiative({ data: { ...item, ...patch } }); await refresh(); }
+    catch (e) { toast.error("Could not update initiative", { description: String((e as Error)?.message ?? e) }); }
+  };
+  const attention = initiativeNeedsAttention({ ...item, status });
+  const overdue = !!item.targetDate && item.targetDate < new Date().toISOString().slice(0, 10) && status !== "Complete";
+  return (
+    <tr className={`align-top ${attention ? "bg-amber-50/40" : ""}`}>
+      <td className="px-4 py-2.5"><p className="font-semibold text-slate-900">{item.name}</p>{item.objective && <p className="text-xs text-slate-500">{item.objective}</p>}</td>
+      <td className="px-3 py-2.5 text-slate-700">{item.owner || "—"}</td>
+      <td className={`px-3 py-2.5 whitespace-nowrap ${overdue ? "text-red-600 font-medium" : "text-slate-700"}`}>{fmtDate(item.targetDate)}{overdue && <span className="block text-[10px]">Overdue</span>}</td>
+      <td className="px-3 py-2.5">
+        <Select value={status} onValueChange={(v) => { setStatus(v); save({ status: v, progressNotes: notes }); }}>
+          <SelectTrigger className={`h-7 text-xs ring-1 ring-inset border-0 ${INIT_PILL[status] ?? ""}`}><SelectValue /></SelectTrigger>
+          <SelectContent>{INITIATIVE_STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+        </Select>
+      </td>
+      <td className="px-3 py-2">
+        <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="Add this month's update…"
+          className="text-xs min-h-[2.5rem] resize-y"
+          onBlur={() => { if (notes !== (item.progressNotes ?? "")) save({ status, progressNotes: notes }); }} />
+      </td>
+    </tr>
   );
 }
 

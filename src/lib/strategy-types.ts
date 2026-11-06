@@ -52,6 +52,35 @@ export interface StrategyActivity {
 
 export const ACTIVITY_STATUSES = ["Not started", "In progress", "Blocked", "Done"] as const;
 
+// ── Leadership review slides (goals + business initiatives) ──────────────────────
+/** Slide key for initiatives with no department. */
+export const CROSS_DEPT_SLIDE = "Cross-department initiatives";
+const INIT_STATUS_RANK: Record<string, number> = { "At risk": 0, Active: 1, Planned: 2, Complete: 3 };
+
+/**
+ * Ordered review slides: departments with goals (in goal order), then departments that only have
+ * initiatives, then one cross-department slide (when not filtered to a single department).
+ */
+export function reviewSlideKeys(goals: StrategyGoal[], initiatives: StrategyInitiative[], dept?: string): string[] {
+  const keys = Array.from(new Set(goals.map((g) => g.department)));
+  const inits = dept ? initiatives.filter((i) => i.department === dept) : initiatives;
+  const extra = Array.from(new Set(inits.map((i) => i.department).filter((d) => d && !keys.includes(d)))).sort();
+  keys.push(...extra);
+  if (!dept && inits.some((i) => !i.department)) keys.push(CROSS_DEPT_SLIDE);
+  return keys;
+}
+
+/** Initiatives shown on a slide, at-risk first. */
+export function initiativesForSlide(initiatives: StrategyInitiative[], key: string): StrategyInitiative[] {
+  const list = key === CROSS_DEPT_SLIDE ? initiatives.filter((i) => !i.department) : initiatives.filter((i) => i.department === key);
+  return [...list].sort((a, b) => (INIT_STATUS_RANK[a.status] ?? 9) - (INIT_STATUS_RANK[b.status] ?? 9) || a.name.localeCompare(b.name));
+}
+
+/** At risk, or past its target date and not complete. */
+export function initiativeNeedsAttention(i: StrategyInitiative, today = new Date().toISOString().slice(0, 10)): boolean {
+  return i.status === "At risk" || (!!i.targetDate && i.targetDate < today && i.status !== "Complete");
+}
+
 export interface StrategyInitiative {
   id: number;
   year: number;
