@@ -101,6 +101,7 @@ function ReviewReport() {
                   <thead className="text-[10px] uppercase tracking-wide text-slate-500">
                     <tr className="border-b border-slate-200">
                       <th className="py-1.5 pr-2 text-left w-[26%]">Goal</th>
+                      <th className="py-1.5 px-2 text-left w-[14%]">Monthly metric</th>
                       <th className="py-1.5 px-2 text-left">Owner</th>
                       <th className="py-1.5 px-2 text-left">Target</th>
                       <th className="py-1.5 px-2 text-left w-[22%]">Jan – {MONTHS[monthIdx]}</th>
@@ -111,7 +112,8 @@ function ReviewReport() {
                   <tbody className="divide-y divide-slate-100">
                     {goals.filter((g) => g.department === d).map((g) => (
                       <tr key={g.id} className="align-top avoid-break">
-                        <td className="py-2 pr-2"><p className="text-[10px] text-slate-400">{g.priority}</p><p className="font-semibold text-slate-900">{g.objective}</p></td>
+                        <td className="py-2 pr-2"><p className="text-[10px] text-slate-400">{g.priority}</p><p className="font-semibold text-slate-900">{g.objective}</p>{g.description && <p className="text-[11px] text-slate-600 mt-0.5">{g.description}</p>}</td>
+                        <td className="py-2 px-2 text-slate-700">{g.monthlyMetric || "—"}</td>
                         <td className="py-2 px-2 text-slate-700">{g.owner || "—"}</td>
                         <td className="py-2 px-2 text-slate-700 whitespace-nowrap">{g.targetValue || "—"}</td>
                         <td className="py-2 px-2">

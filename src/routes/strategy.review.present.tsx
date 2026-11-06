@@ -140,10 +140,20 @@ function GoalSlideCard({ goal, monthIdx, hasNotes, onOpen, onEdit, onMeta }: {
         </div>
         <StatusPill status={status} className="text-xs px-2.5 py-1 shrink-0" />
       </div>
-      <div className="grid grid-cols-3 gap-2">
-        <Stat label={`${MONTHS[monthIdx]} actual`} value={actual || "Not reported"} tone={actual ? status === "Off track" ? "text-red-600" : "text-teal-600" : "text-slate-400"} />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-px bg-slate-200 border border-slate-200 rounded-lg overflow-hidden text-sm">
+        <div className="bg-white p-3">
+          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Goal</p>
+          <p className="text-slate-700 mt-0.5 whitespace-pre-line">{goal.description || goal.successCriteria || "—"}</p>
+        </div>
+        <div className="bg-white p-3">
+          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Monthly metric</p>
+          <p className="text-slate-700 mt-0.5 whitespace-pre-line">{goal.monthlyMetric || "—"}</p>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <Stat label={`${MONTHS[monthIdx]} actual`} value={actual || "Not reported"} tone={actual ? status === "Off track" ? "text-red-600" : "text-teal-600" : "text-slate-400"}
+          sub={streak >= 2 ? `Off track ${streak} months running` : undefined} subTone="text-amber-700" />
         <Stat label="Target" value={goal.targetValue || "—"} sub={goal.direction === "decrease" ? "lower is better" : "higher is better"} />
-        <Stat label="Baseline" value={goal.baselineValue || "—"} sub={streak >= 2 ? `Off track ${streak} months running` : undefined} subTone="text-amber-700" />
       </div>
       <MonthStrip goal={goal} size="md" highlightMonth={monthIdx} onEdit={onEdit} onMeta={onMeta} />
       {comment && <p className="text-xs text-slate-600"><span className="font-semibold text-slate-700">{MONTHS[monthIdx]} comment:</span> <span className="whitespace-pre-line">{comment}</span></p>}
@@ -227,7 +237,7 @@ function Stat({ label, value, sub, tone = "text-slate-900", subTone = "text-slat
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-4">
       <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">{label}</p>
-      <p className={`text-xl font-bold mt-1 truncate ${tone}`}>{value}</p>
+      <p className={`text-xl font-bold mt-1 truncate ${tone}`} title={value}>{value}</p>
       {sub && <p className={`text-[11px] mt-0.5 ${subTone}`}>{sub}</p>}
     </div>
   );
