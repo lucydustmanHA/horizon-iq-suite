@@ -6,7 +6,8 @@ export const $getSettings = createServerFn({ method: "GET" }).handler(async () =
   try {
     const db = await getDb();
     const { rows } = await db.query(
-      "SELECT setting_key, option_value FROM public.app_settings ORDER BY setting_key, sort_order, option_value"
+      // secret_* keys (e.g. the Teams webhook URL) are server-only and never sent to the browser
+      "SELECT setting_key, option_value FROM public.app_settings WHERE setting_key NOT LIKE 'secret\\_%' ORDER BY setting_key, sort_order, option_value"
     );
     const out: Record<string, string[]> = {};
     for (const r of rows) {
@@ -21,8 +22,13 @@ export const $getSettings = createServerFn({ method: "GET" }).handler(async () =
   }
 });
 
+const isSecretKey = (k: string) => String(k ?? "").toLowerCase().startsWith("secret_");
+
 export const $upsertSettingOption = createServerFn({ method: "POST" })
-  .validator((data: { key: string; value: string }) => data)
+  .validator((data: { key: string; value: string }) => {
+    if (isSecretKey(data.key)) throw new Error("This setting can't be changed here.");
+    return data;
+  })
   .handler(async ({ data }) => {
     const db = await getDb();
     await db.query(
@@ -45,7 +51,10 @@ export const $saveAppName = createServerFn({ method: "POST" })
   });
 
 export const $removeSettingOption = createServerFn({ method: "POST" })
-  .validator((data: { key: string; value: string }) => data)
+  .validator((data: { key: string; value: string }) => {
+    if (isSecretKey(data.key)) throw new Error("This setting can't be changed here.");
+    return data;
+  })
   .handler(async ({ data }) => {
     const db = await getDb();
     await db.query(

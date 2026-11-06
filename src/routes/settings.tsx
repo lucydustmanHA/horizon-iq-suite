@@ -1,6 +1,8 @@
 
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
+import { $getTeamsWebhookStatus, $saveTeamsWebhook, $clearTeamsWebhook, $sendTeamsTest } from "../lib/teams.server";
 import { usePortfolio } from "../lib/store";
 import { $upsertSettingOption, $removeSettingOption, $saveAppName } from "../lib/settings.server";
 import { Input } from "../components/ui/input";
@@ -197,6 +199,56 @@ function StrategyOptionList({ settingKey, label, hint, numeric }: { settingKey: 
   );
 }
 
+/** Teams webhook (Power Automate) — only visible to Teams admins; the full URL never comes back to the browser. */
+function TeamsWebhookCard() {
+  const [status, setStatus] = useState<{ canManage: boolean; configured: boolean; hint: string; email: string } | null>(null);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState<"" | "save" | "test" | "clear">("");
+  const load = () => $getTeamsWebhookStatus().then(setStatus).catch(() => setStatus(null));
+  useEffect(() => { load(); }, []);
+  if (!status?.canManage) return null;
+  const err = (e: unknown) => String((e as Error)?.message ?? e);
+  const save = async () => {
+    setBusy("save");
+    try { await $saveTeamsWebhook({ data: { url: draft } }); setDraft(""); toast.success("Teams link saved"); await load(); }
+    catch (e) { toast.error("Could not save", { description: err(e) }); }
+    finally { setBusy(""); }
+  };
+  const test = async () => {
+    setBusy("test");
+    try { const r = await $sendTeamsTest(); toast.success("Test sent", { description: `Check Teams for a Workflows message to ${r.sentTo}. It can take up to a minute.` }); }
+    catch (e) { toast.error("Test failed", { description: err(e) }); }
+    finally { setBusy(""); }
+  };
+  const clear = async () => {
+    if (!confirm("Remove the Teams link? Reminders will stop until a new one is added.")) return;
+    setBusy("clear");
+    try { await $clearTeamsWebhook(); toast.success("Teams link removed"); await load(); }
+    catch (e) { toast.error("Could not remove", { description: err(e) }); }
+    finally { setBusy(""); }
+  };
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm md:col-span-2">
+      <div className="flex items-baseline justify-between gap-2 mb-1">
+        <h3 className="text-sm font-semibold text-slate-900">Teams reminders</h3>
+        <span className={`text-[10px] font-semibold uppercase tracking-wide ${status.configured ? "text-emerald-600" : "text-slate-400"}`}>
+          {status.configured ? `Connected ${status.hint}` : "Not connected"}
+        </span>
+      </div>
+      <p className="text-xs text-slate-500 mb-3">
+        Paste the HTTP URL from your Power Automate flow (the “When a Teams webhook request is received” step). It’s stored privately — after saving only the last few characters are shown. Only you can see this box.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Input type="password" autoComplete="off" value={draft} onChange={(e) => setDraft(e.target.value)}
+          placeholder={status.configured ? "Paste a new URL to replace the current one…" : "https://…logic.azure.com/…"} className="h-8 text-sm flex-1 min-w-[16rem]" />
+        <Button size="sm" className="h-8 bg-accent-indigo hover:bg-accent-indigo/90 text-white" onClick={save} disabled={!draft.trim() || !!busy}>{busy === "save" ? "Saving…" : "Save"}</Button>
+        <Button size="sm" variant="outline" className="h-8" onClick={test} disabled={!status.configured || !!busy}>{busy === "test" ? "Sending…" : "Send test to me"}</Button>
+        {status.configured && <Button size="sm" variant="ghost" className="h-8 text-slate-400 hover:text-status-danger" onClick={clear} disabled={!!busy}>Remove</Button>}
+      </div>
+    </div>
+  );
+}
+
 function SettingsPage() {
   const { tab = "general" } = Route.useSearch();
   const navigate = useNavigate();
@@ -233,6 +285,7 @@ function SettingsPage() {
               <StrategyOptionList settingKey={STRATEGY_SETTING_KEYS.priority} label="Strategic Priorities" hint="The pillars goals roll up to." />
               <StrategyOptionList settingKey={STRATEGY_SETTING_KEYS.year} label="Plan Years" hint="Extra years for the year dropdown. Years with data appear automatically." numeric />
               <StrategyOptionList settingKey={STRATEGY_SETTING_KEYS.deepDiveArea} label="Deep Dive Areas" hint="Groups for deep-dive action items." />
+              <TeamsWebhookCard />
             </div>
           )}
           {tab === "costs" && <CostsPanel />}
