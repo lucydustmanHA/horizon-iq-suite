@@ -3,8 +3,92 @@
  * Called from client components; run on the server and hit Lakebase directly.
  */
 import { createServerFn } from "@tanstack/react-start";
-import { getDb } from "./db.server";
+import { getDb, runMigrations } from "./db.server";
 import type { UseCase } from "./types";
+
+// ---------------------------------------------------------------------------
+// Links column parser — handles JSON arrays AND recursively-nested Postgres
+// array literal format (from data that was re-saved multiple times).
+// ---------------------------------------------------------------------------
+function parseLinksColumn(raw: unknown): string[] {
+  if (!raw) return [];
+  const str = String(raw).trim();
+  if (!str || str === '{}' || str === '[]') return [];
+
+  // 1. Clean JSON array (new format after fix)
+  try {
+    const parsed = JSON.parse(str);
+    if (Array.isArray(parsed)) return parsed.map(String);
+  } catch {}
+
+  // 2. Recursively unwrap Postgres array literal layers
+  const unwrapped = unwrapPgArray(str, 0);
+  if (unwrapped.length > 0) return unwrapped;
+
+  // 3. Final fallback: treat as single entry
+  return [str];
+}
+
+/** Recursively unwrap Postgres array literal format: {"elem","elem"} */
+function unwrapPgArray(str: string, depth: number): string[] {
+  if (depth > 8 || !str.startsWith('{') || !str.endsWith('}')) return [];
+
+  const elements = extractPgElements(str.slice(1, -1));
+  if (elements.length === 0) return [];
+
+  const results: string[] = [];
+  for (const el of elements) {
+    // If element is a JSON object or array, keep as-is
+    try {
+      const obj = JSON.parse(el);
+      if (Array.isArray(obj)) { results.push(...obj.map(String)); continue; }
+      if (obj && typeof obj === 'object') { results.push(el); continue; }
+    } catch {}
+
+    // If element is another Postgres array literal, recurse
+    if (el.startsWith('{') && el.endsWith('}') && !el.startsWith('{"type"')) {
+      const nested = unwrapPgArray(el, depth + 1);
+      if (nested.length > 0) { results.push(...nested); continue; }
+    }
+
+    // Otherwise it's a plain value (URL, etc.)
+    results.push(el);
+  }
+  return results;
+}
+
+/** Parse individual quoted elements from inside a Postgres array literal.
+ *  Handles: "elem" with \" for literal quotes and \\ for literal backslashes. */
+function extractPgElements(inner: string): string[] {
+  const elements: string[] = [];
+  let i = 0;
+  while (i < inner.length) {
+    if (inner[i] === '"') {
+      // Quoted element — un-escape as we go
+      let j = i + 1;
+      let el = '';
+      while (j < inner.length) {
+        if (inner[j] === '\\' && j + 1 < inner.length) {
+          el += inner[j + 1]; j += 2;
+        } else if (inner[j] === '"') { break; }
+        else { el += inner[j]; j++; }
+      }
+      elements.push(el);
+      i = j + 1;
+      if (inner[i] === ',') i++;
+    } else if (inner[i] === ',') {
+      i++;
+    } else {
+      // Unquoted element (e.g. NULL)
+      let j = i;
+      while (j < inner.length && inner[j] !== ',') j++;
+      const val = inner.slice(i, j).trim();
+      if (val && val.toLowerCase() !== 'null') elements.push(val);
+      i = j + 1;
+    }
+  }
+  return elements;
+}
 
 // ---------------------------------------------------------------------------
 // DB row → UseCase mapper
@@ -42,7 +126,12 @@ function rowToUseCase(r: Record<string, unknown>): UseCase {
     effortAfter: (Number(r.effort_after) || 0) as UseCase["effortAfter"],
     proactivePct: r.proactive_work_pct != null ? Number(r.proactive_work_pct) : null,
     reactivePct: r.reactive_work_pct != null ? Number(r.reactive_work_pct) : null,
+    liveNonApplicable: r.live_non_applicable === true,
+    closeToCompletion: r.close_to_completion === true,
     notes: String(r.notes ?? ""),
+    statusUpdate: String(r.status_update ?? ""),
+    statusUpdateDate: r.status_update_date ? new Date(String(r.status_update_date)).toISOString() : null,
+    reviewCycle: String(r.review_cycle ?? ""),
     devLeadTimeDays: r.dev_lead_time_days != null ? Number(r.dev_lead_time_days) : null,
     resolutionTimeDays: r.resolution_time_days != null ? Number(r.resolution_time_days) : null,
     developmentStartedAt: r.development_started_at ? (r.development_started_at instanceof Date ? r.development_started_at.toISOString() : String(r.development_started_at)) : null,
@@ -50,7 +139,7 @@ function rowToUseCase(r: Record<string, unknown>): UseCase {
     targetEndDate: r.target_end_date ? (r.target_end_date instanceof Date ? r.target_end_date.toISOString() : String(r.target_end_date)) : null,
     comments: [],
     attachments: [],
-    links: r.links ? [String(r.links)] : [],
+    links: parseLinksColumn(r.links),
     activity: [],
   } as UseCase;
 }
@@ -63,6 +152,7 @@ function rowToUseCase(r: Record<string, unknown>): UseCase {
 export const $loadUseCases = createServerFn({ method: "GET" }).handler(
   async (): Promise<UseCase[]> => {
     console.log("[DB] $loadUseCases called");
+    await runMigrations();
     try {
       const db = await getDb();
       const { rows } = await db.query(
@@ -107,6 +197,7 @@ export const $loadUseCases = createServerFn({ method: "GET" }).handler(
 export const $moveStage = createServerFn({ method: "POST" })
   .validator((data: { id: string; from: string; to: string }) => data)
   .handler(async ({ data }) => {
+    await runMigrations();
     const db = await getDb();
     // Base stage update
     await db.query(
@@ -124,22 +215,26 @@ export const $moveStage = createServerFn({ method: "POST" })
         [data.id]
       );
     }
-    // Clear last_completed_at when leaving Completed
-    if (data.from === "Completed" && data.to !== "Completed") {
+    // When leaving Live (regression) — stamp resolution_start_at and clear completed date
+    if (data.from === "Live" && data.to !== "Live") {
       await db.query(
-        `UPDATE public.use_cases SET last_completed_at = NULL WHERE use_case_id = $1`,
+        `UPDATE public.use_cases SET last_completed_at = NULL, resolution_start_at = NOW() WHERE use_case_id = $1`,
         [data.id]
       );
     }
-    // Auto-calculate dev_lead_time_days when reaching Completed
-    if (data.to === "Completed") {
+    // Auto-calculate dev_lead_time_days + resolution_time_days when reaching Live or Closed
+    if (data.to === "Live" || data.to === "Closed") {
       await db.query(
         `UPDATE public.use_cases
-           SET last_completed_at = NOW(),
+           SET last_completed_at = COALESCE(last_completed_at, NOW()),
                dev_lead_time_days = COALESCE(dev_lead_time_days,
                  CASE WHEN development_started_at IS NOT NULL
                    THEN EXTRACT(DAY FROM NOW() - development_started_at)::int
-                   ELSE NULL END)
+                   ELSE NULL END),
+               resolution_time_days = CASE WHEN resolution_start_at IS NOT NULL
+                   THEN EXTRACT(DAY FROM NOW() - resolution_start_at)::int
+                   ELSE resolution_time_days END,
+               resolution_start_at = NULL
          WHERE use_case_id = $1`,
         [data.id]
       );
@@ -198,12 +293,18 @@ export const $updateUseCase = createServerFn({ method: "POST" })
       reactivePct: "reactive_work_pct",
       comments: "comments",
       links: "links",
+      closeToCompletion: "close_to_completion",
     };
 
     for (const [key, col] of Object.entries(map)) {
       if (key in patch) {
         fields.push(`${col} = $${i++}`);
-        values.push((patch as Record<string, unknown>)[key]);
+        let val = (patch as Record<string, unknown>)[key];
+        // Serialize links array as JSON for TEXT column storage
+        if (key === 'links' && Array.isArray(val)) {
+          val = JSON.stringify(val);
+        }
+        values.push(val);
       }
     }
     if (!fields.length) return;
@@ -214,6 +315,38 @@ export const $updateUseCase = createServerFn({ method: "POST" })
       `UPDATE public.use_cases SET ${fields.join(", ")} WHERE use_case_id = $${i}`,
       values
     );
+
+    // Auto-populate when stage changes via dropdown (same logic as $moveStage)
+    if (patch.stage === "Development") {
+      await db.query(
+        `UPDATE public.use_cases SET development_started_at = COALESCE(development_started_at, NOW()) WHERE use_case_id = $1`,
+        [id]
+      );
+    }
+    // When leaving Live via dropdown
+    if (patch.stage && patch.stage !== "Live" && patch.stage !== "Closed") {
+      // Check if it was previously Live
+      const { rows: prev } = await db.query(`SELECT stage FROM public.use_cases WHERE use_case_id = $1`, [id]);
+      if (prev[0]?.stage === "Live") {
+        await db.query(`UPDATE public.use_cases SET resolution_start_at = COALESCE(resolution_start_at, NOW()) WHERE use_case_id = $1`, [id]);
+      }
+    }
+    if (patch.stage === "Live" || patch.stage === "Closed") {
+      await db.query(
+        `UPDATE public.use_cases
+           SET last_completed_at = COALESCE(last_completed_at, NOW()),
+               dev_lead_time_days = COALESCE(dev_lead_time_days,
+                 CASE WHEN development_started_at IS NOT NULL
+                   THEN EXTRACT(DAY FROM NOW() - development_started_at)::int
+                   ELSE NULL END),
+               resolution_time_days = CASE WHEN resolution_start_at IS NOT NULL
+                   THEN EXTRACT(DAY FROM NOW() - resolution_start_at)::int
+                   ELSE resolution_time_days END,
+               resolution_start_at = NULL
+         WHERE use_case_id = $1`,
+        [id]
+      );
+    }
   });
 
 /** Load comments for a single use case (for real-time refresh on detail page). */
@@ -320,6 +453,7 @@ export const $getTodos = createServerFn({ method: "GET" })
       id: String(r.todo_id), useCaseId: String(r.use_case_id),
       text: String(r.text ?? ""), assignee: String(r.assignee ?? ""),
       done: Boolean(r.done), createdDate: String(r.created_date ?? ""),
+      dueDate: r.due_date ? new Date(String(r.due_date)).toISOString().split("T")[0] : null,
     }));
   });
 
@@ -330,7 +464,7 @@ export const $getActionNeededWithTodos = createServerFn({ method: "GET" }).handl
   );
   const useCases = ucRows.map(rowToUseCase);
   const ids = useCases.map((u: { id: string }) => u.id);
-  let todos: Array<{id:string;useCaseId:string;text:string;assignee:string;done:boolean;createdDate:string}> = [];
+  let todos: Array<{id:string;useCaseId:string;text:string;assignee:string;done:boolean;createdDate:string;dueDate:string|null}> = [];
   if (ids.length > 0) {
     const placeholders = ids.map((_: string, i: number) => `$${i + 1}`).join(",");
     const { rows: tRows } = await db.query(
@@ -341,13 +475,14 @@ export const $getActionNeededWithTodos = createServerFn({ method: "GET" }).handl
       id: String(r.todo_id), useCaseId: String(r.use_case_id),
       text: String(r.text ?? ""), assignee: String(r.assignee ?? ""),
       done: Boolean(r.done), createdDate: String(r.created_date ?? ""),
+      dueDate: r.due_date ? new Date(String(r.due_date)).toISOString().split("T")[0] : null,
     }));
   }
   return { useCases, todos };
 });
 
 export const $addTodo = createServerFn({ method: "POST" })
-  .validator((data: { useCaseId: string; text: string; assignee: string; createdBy?: string }) => data)
+  .validator((data: { useCaseId: string; text: string; assignee: string; dueDate?: string; createdBy?: string }) => data)
   .handler(async ({ data }) => {
     const db = await getDb();
     // auto-flag use case as Action Needed if not already blocked
@@ -356,22 +491,25 @@ export const $addTodo = createServerFn({ method: "POST" })
       [data.useCaseId]
     );
     const { rows } = await db.query(
-      "INSERT INTO public.use_case_todos (use_case_id, text, assignee, created_by) VALUES ($1, $2, $3, $4) RETURNING *",
-      [data.useCaseId, data.text, data.assignee ?? "", data.createdBy ?? ""]
+      "INSERT INTO public.use_case_todos (use_case_id, text, assignee, created_by, due_date) VALUES ($1, $2, $3, $4, $5) RETURNING *",
+      [data.useCaseId, data.text, data.assignee ?? "", data.createdBy ?? "", data.dueDate || null]
     );
     const r = rows[0] as Record<string, unknown>;
     return { id: String(r.todo_id), useCaseId: String(r.use_case_id), text: String(r.text ?? ""),
-      assignee: String(r.assignee ?? ""), done: Boolean(r.done), createdDate: String(r.created_date ?? "") };
+      assignee: String(r.assignee ?? ""), done: Boolean(r.done), createdDate: String(r.created_date ?? ""),
+      dueDate: r.due_date ? new Date(String(r.due_date)).toISOString().split("T")[0] : null };
   });
 
 export const $updateTodo = createServerFn({ method: "POST" })
-  .validator((data: { id: string; text?: string; assignee?: string; done?: boolean }) => data)
+  .validator((data: { id: string; text?: string; assignee?: string; done?: boolean; dueDate?: string | null }) => data)
   .handler(async ({ data }) => {
     const db = await getDb();
     if (data.text !== undefined)
       await db.query("UPDATE public.use_case_todos SET text = $1 WHERE todo_id = $2", [data.text, data.id]);
     if (data.assignee !== undefined)
       await db.query("UPDATE public.use_case_todos SET assignee = $1 WHERE todo_id = $2", [data.assignee, data.id]);
+    if (data.dueDate !== undefined)
+      await db.query("UPDATE public.use_case_todos SET due_date = $1 WHERE todo_id = $2", [data.dueDate || null, data.id]);
     if (data.done !== undefined) {
       await db.query("UPDATE public.use_case_todos SET done = $1 WHERE todo_id = $2", [data.done, data.id]);
       if (data.done) {
@@ -410,6 +548,70 @@ export const $deleteTodo = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+export const $getAllTodosWithDueDates = createServerFn({ method: "GET" }).handler(async () => {
+  const db = await getDb();
+  const { rows } = await db.query(
+    `SELECT t.todo_id, t.use_case_id, t.text, t.assignee, t.done, t.due_date,
+            u.title AS uc_title
+     FROM public.use_case_todos t
+     JOIN public.use_cases u ON u.use_case_id = t.use_case_id
+     WHERE t.due_date IS NOT NULL
+     ORDER BY t.due_date ASC`
+  );
+  return rows.map((r: Record<string, unknown>) => ({
+    id: String(r.todo_id),
+    useCaseId: String(r.use_case_id),
+    text: String(r.text ?? ""),
+    assignee: String(r.assignee ?? ""),
+    done: Boolean(r.done),
+    dueDate: new Date(String(r.due_date)).toISOString().split("T")[0],
+    ucTitle: String(r.uc_title ?? ""),
+  }));
+});
+
+/** Post a new status update — archives the old one into notes first */
+export const $postStatusUpdate = createServerFn({ method: "POST" })
+  .validator((data: { id: string; update: string }) => data)
+  .handler(async ({ data }) => {
+    const db = await getDb();
+    // Fetch current status update to archive
+    const { rows } = await db.query(
+      "SELECT status_update, status_update_date, notes FROM public.use_cases WHERE use_case_id = $1",
+      [data.id]
+    );
+    if (rows.length === 0) return { ok: false };
+    const old = rows[0] as Record<string, unknown>;
+    const oldUpdate = String(old.status_update ?? "").trim();
+    const oldDate = old.status_update_date ? new Date(String(old.status_update_date)) : null;
+    let notes = String(old.notes ?? "");
+
+    // Archive old update into notes if it exists
+    if (oldUpdate) {
+      const dateStr = oldDate ? oldDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "Unknown date";
+      const archived = `**Status Update (${dateStr}):** ${oldUpdate}`;
+      notes = notes ? `${archived}\n\n---\n\n${notes}` : archived;
+    }
+
+    // Save new update + archived notes
+    await db.query(
+      "UPDATE public.use_cases SET status_update = $1, status_update_date = NOW(), notes = $2 WHERE use_case_id = $3",
+      [data.update.trim(), notes, data.id]
+    );
+
+    // Return updated values
+    const { rows: updated } = await db.query(
+      "SELECT status_update, status_update_date, notes FROM public.use_cases WHERE use_case_id = $1",
+      [data.id]
+    );
+    const r = updated[0] as Record<string, unknown>;
+    return {
+      ok: true,
+      statusUpdate: String(r.status_update ?? ""),
+      statusUpdateDate: r.status_update_date ? new Date(String(r.status_update_date)).toISOString() : null,
+      notes: String(r.notes ?? ""),
+    };
+  });
+
 /** Save notes for a use case */
 export const $saveNotes = createServerFn({ method: "POST" })
   .validator((data: { id: string; notes: string }) => data)
@@ -417,6 +619,83 @@ export const $saveNotes = createServerFn({ method: "POST" })
     const db = await getDb();
     await db.query("UPDATE public.use_cases SET notes=$1 WHERE use_case_id=$2", [data.notes, data.id]);
     return { ok: true };
+  });
+
+// ─── Use Case Links (bidirectional "related to") ──────────────────────────
+
+export interface UseCaseLink {
+  linkId: number;
+  id: string;
+  title: string;
+  workgroup: string;
+  status: string;
+}
+
+/** Get all linked cases for a given use case (bidirectional). */
+export const $getLinkedCases = createServerFn({ method: "GET" })
+  .validator((data: { useCaseId: string }) => data)
+  .handler(async ({ data }): Promise<UseCaseLink[]> => {
+    const db = await getDb();
+    const { rows } = await db.query(
+      `SELECT l.id as link_id, u.use_case_id, u.title, u.workgroup, u.status
+       FROM use_case_links l
+       JOIN use_cases u ON u.use_case_id = CASE WHEN l.source_id = (SELECT id FROM use_cases WHERE use_case_id = $1) THEN (SELECT use_case_id FROM use_cases WHERE id = l.target_id) ELSE (SELECT use_case_id FROM use_cases WHERE id = l.source_id) END
+       WHERE l.source_id = (SELECT id FROM use_cases WHERE use_case_id = $1)
+          OR l.target_id = (SELECT id FROM use_cases WHERE use_case_id = $1)
+       ORDER BY u.title`,
+      [data.useCaseId]
+    );
+    return rows.map((r: Record<string, unknown>) => ({
+      linkId: Number(r.link_id),
+      id: String(r.use_case_id),
+      title: String(r.title ?? ""),
+      workgroup: String(r.workgroup ?? ""),
+      status: String(r.status ?? ""),
+    }));
+  });
+
+/** Add a bidirectional link between two use cases. */
+export const $addLink = createServerFn({ method: "POST" })
+  .validator((data: { sourceId: string; targetId: string }) => data)
+  .handler(async ({ data }) => {
+    const db = await getDb();
+    const { rows: srcRows } = await db.query("SELECT id FROM use_cases WHERE use_case_id = $1", [data.sourceId]);
+    const { rows: tgtRows } = await db.query("SELECT id FROM use_cases WHERE use_case_id = $1", [data.targetId]);
+    if (!srcRows[0] || !tgtRows[0]) throw new Error("Use case not found");
+    const srcPk = Number(srcRows[0].id);
+    const tgtPk = Number(tgtRows[0].id);
+    // Always store smaller id as source to avoid duplicate links in both directions
+    const [a, b] = srcPk < tgtPk ? [srcPk, tgtPk] : [tgtPk, srcPk];
+    await db.query(
+      "INSERT INTO use_case_links (source_id, target_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+      [a, b]
+    );
+    return { ok: true };
+  });
+
+/** Remove a link by its ID. */
+export const $removeLink = createServerFn({ method: "POST" })
+  .validator((data: { linkId: number }) => data)
+  .handler(async ({ data }) => {
+    const db = await getDb();
+    await db.query("DELETE FROM use_case_links WHERE id = $1", [data.linkId]);
+    return { ok: true };
+  });
+
+/** Get link counts for all use cases (for Kanban badges). */
+export const $getLinkCounts = createServerFn({ method: "GET" })
+  .handler(async (): Promise<Record<string, number>> => {
+    const db = await getDb();
+    const { rows } = await db.query(
+      `SELECT u.use_case_id, COUNT(*) as cnt FROM (
+        SELECT source_id as pk FROM use_case_links UNION ALL SELECT target_id FROM use_case_links
+       ) sub
+       JOIN use_cases u ON u.id = sub.pk
+       GROUP BY u.use_case_id`
+    );
+    const map: Record<string, number> = {};
+    for (const r of rows) map[String(r.use_case_id)] = Number(r.cnt);
+    return map;
   });
 
 /** Permanently delete a use case and all its todos */

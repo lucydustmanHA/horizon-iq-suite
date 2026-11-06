@@ -1,7 +1,7 @@
 
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { CelebrationOverlay } from "./celebration";
-import { LayoutDashboard, Table2, KanbanSquare, Sparkles, Search, Plus, AlertCircle, Settings, Rocket, DollarSign, CalendarDays } from "lucide-react";
+import { LayoutDashboard, Table2, KanbanSquare, Sparkles, Search, Plus, AlertCircle, Settings, Rocket, DollarSign, CalendarDays, TrendingUp } from "lucide-react";
 
 import { useState, type ReactNode, useEffect } from "react";
 import { Input } from "./ui/input";
@@ -13,6 +13,7 @@ import { usePortfolio } from "../lib/store";
 import { STAGES } from "../lib/types";
 import { $createUseCase } from "../lib/use-cases.server";
 import { $getSettings, $upsertSettingOption, $removeSettingOption } from "../lib/settings.server";
+import { SideSwitcher } from "./side-switcher";
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -126,27 +127,28 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex h-screen bg-slate-50 font-sans text-slate-900">
       <aside className="hidden md:flex w-64 shrink-0 bg-brand text-brand-foreground flex-col no-print" data-no-print>
-        <div className="p-6"><Link to="/" className="flex items-center gap-3"><img src="/logo.svg" alt="Horizon AI" className="size-9 rounded-full" /><span className="font-semibold tracking-tight text-lg">Horizon QX</span></Link></div>
+        <div className="p-6 pb-4"><Link to="/" className="flex items-center gap-3"><img src="/logo.svg" alt="Horizon AI" className="size-9 rounded-full" /><span className="leading-tight"><span className="block font-semibold tracking-tight text-lg">{usePortfolio((s) => s.appName ?? "Horizon QX")}</span><span className="block text-[11px] text-slate-400 font-medium">Business Transformation</span></span></Link></div>
+        <SideSwitcher current="ai" />
         <nav className="flex-1 px-4 space-y-1">
           {NAV.slice(0, 3).map(({ to, label: navLabel, icon: Icon }) => {
             const active = to === "/" ? pathname === "/" : to === "/use-cases" ? pathname === "/use-cases" : pathname.startsWith(to);
             return <Link key={to} to={to} className={"flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors "+(active?"bg-white/10 text-white":"text-slate-400 hover:text-white hover:bg-white/5")}><Icon className="size-4" /><span>{navLabel}</span></Link>;
           })}
-          <a href="/portfolios" className={"flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors "+(pathname.startsWith("/portfolios")?"bg-white/10 text-white":"text-slate-400 hover:text-white hover:bg-white/5")}>
+          <Link to="/adoption" className={"flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors "+(pathname.startsWith("/adoption")?"bg-white/10 text-white":"text-slate-400 hover:text-white hover:bg-white/5")}>
+            <TrendingUp className="size-4" /><span>AI Adoption</span>
+          </Link>
+          <Link to="/portfolios" className={"flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors "+(pathname.startsWith("/portfolios")?"bg-white/10 text-white":"text-slate-400 hover:text-white hover:bg-white/5")}>
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="size-4"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg><span>Portfolios</span>
-          </a>
+          </Link>
           {NAV.slice(3).map(({ to, label: navLabel, icon: Icon }) => {
             const active = to === "/" ? pathname === "/" : to === "/use-cases" ? pathname === "/use-cases" : pathname.startsWith(to);
             return <Link key={to} to={to} className={"flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors "+(active?"bg-white/10 text-white":"text-slate-400 hover:text-white hover:bg-white/5")}><Icon className="size-4" /><span>{navLabel}</span></Link>;
           })}
         </nav>
         <div className="px-4 pb-4">
-          <a href="/admin" className={"flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors "+(pathname.startsWith("/admin")?"bg-white/10 text-white":"text-slate-300 hover:text-white hover:bg-white/5")}>
-            <DollarSign className="size-4" /><span>Admin</span>
-          </a>
-          <a href="/settings" className={"flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors "+(pathname.startsWith("/settings")?"bg-white/10 text-white":"text-slate-400 hover:text-white hover:bg-white/5")}>
-            <Settings className="size-4" /><span>Settings</span>
-          </a>
+          <Link to="/settings" className={"flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors "+(pathname.startsWith("/settings")||pathname.startsWith("/admin")?"bg-white/10 text-white":"text-slate-400 hover:text-white hover:bg-white/5")}>
+            <Settings className="size-4" /><span>Settings & Admin</span>
+          </Link>
         </div>
       </aside>
       <CelebrationOverlay />
@@ -160,16 +162,16 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
           <div className="flex items-center gap-3 shrink-0">
             {actionNeededCount > 0 && (
-              <a href="/action-needed" className="flex items-center gap-1.5 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-3 py-1.5 hover:bg-amber-100 transition-colors">
+              <Link to="/action-needed" className="flex items-center gap-1.5 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-3 py-1.5 hover:bg-amber-100 transition-colors">
                 <AlertCircle className="size-3.5" />{actionNeededCount} flagged
-              </a>
+              </Link>
             )}
             <Button className="bg-accent-indigo hover:bg-accent-indigo/90 text-white gap-1.5" onClick={() => setNewOpen(true)}>
               <Plus className="size-4" />New Use Case
             </Button>
           </div>
         </header>
-        <div className="flex-1 overflow-y-auto">{children}</div>
+        <div className="flex-1 overflow-y-auto app-content">{children}</div>
       </main>
       <NewUseCaseDialog open={newOpen} onClose={() => setNewOpen(false)} />
     </div>

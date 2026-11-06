@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect, useMemo } from "react";
-import { ArrowLeft, ArrowUp, ArrowDown, ArrowUpDown, Plus, X, Check } from "lucide-react";
+import { ArrowLeft, ArrowUp, ArrowDown, ArrowUpDown, Plus, X, Check, Download } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import {
@@ -105,6 +105,34 @@ function PortfolioDetailPage() {
     });
   };
 
+  const RAG_DESCS: Record<string, string> = {
+    green: "Live and on track",
+    orange: "Live and closely monitoring",
+    red: "Live and action needed",
+  };
+  function csvSafe(v: unknown) { const s = String(v ?? ""); return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s; }
+  function ragDescription(u: typeof allUseCases[0]) {
+    if (u.stage !== "Completed") return "";
+    if (u.reviewCycle === "One-and-Done") return "Live but no tracking necessary";
+    return "Live";
+  }
+  function exportPortfolioCsv() {
+    const headers = ["id","title","workgroup","stage","flag","priority","owner","annualHoursSaved","costSavings","reviewCycle","approach","ragDescription","statusUpdate","description"];
+    const lines = [headers.join(",")];
+    for (const u of memberUseCases) {
+      const approach = u.proactivePct === 100 ? "Proactive" : u.proactivePct === 0 ? "Reactive" : "";
+      lines.push([
+        u.id, csvSafe(u.title), csvSafe(u.workgroup), u.stage, u.status, u.priority,
+        csvSafe(u.useCaseOwner), u.annualTimeSaved, u.costSavings,
+        csvSafe(u.reviewCycle ?? ""), approach, csvSafe(ragDescription(u)),
+        csvSafe(u.statusUpdate), csvSafe(u.description)
+      ].join(","));
+    }
+    const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = `${portfolio?.name ?? "portfolio"}.csv`; a.click(); URL.revokeObjectURL(url);
+  }
+
   if (loading) return <div className="p-8 text-sm text-muted-foreground">Loading…</div>;
   if (!portfolio) return <div className="p-8 text-sm text-red-500">Portfolio not found.</div>;
 
@@ -139,6 +167,11 @@ function PortfolioDetailPage() {
           <Plus className="size-3.5" />
           Add Use Cases
         </Button>
+        {memberUseCases.length > 0 && (
+          <Button size="sm" variant="outline" className="gap-1.5" onClick={exportPortfolioCsv}>
+            <Download className="size-3.5" /> Export
+          </Button>
+        )}
       </div>
 
       {/* Table */}

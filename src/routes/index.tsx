@@ -1,7 +1,7 @@
 
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { X } from "lucide-react";
+import { X, MessageSquare } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { usePortfolio } from "../lib/store";
 import { STAGES } from "../lib/types";
@@ -21,15 +21,15 @@ function Dashboard() {
   const stats = useMemo(() => {
     const total = useCases.filter((u) => u.stage !== "Archive").length;
     const active = useCases.filter((u) => ["Intake","Discovery","Development","Testing & Validation","Deployment"].includes(u.stage)).length;
-    const completed = useCases.filter((u) => u.stage === "Completed").length;
+    const live = useCases.filter((u) => u.stage === "Live").length;
+    const closed = useCases.filter((u) => u.stage === "Closed").length;
     const priority2026 = useCases.filter((u) => u.priority === 1).length;
-    const completed2026 = useCases.filter((u) => u.priority === 1 && ["Testing & Validation","Deployment","Completed","Archive"].includes(u.stage)).length;
-    const pct2026Complete = priority2026 > 0 ? (completed2026 / priority2026) * 100 : 0;
+    const totalDelivered = useCases.filter((u) => ["Live","Closed"].includes(u.stage) || u.lastCompletedAt).length;
     const flagged = useCases.filter((u) => u.status === "Blocked" || u.status === "Action Needed").length;
 
     // Only use seeded/user-entered data (exclude zeroes from avg calculations)
-    const withTime = useCases.filter((u) => (u.annualTimeSaved ?? 0) > 0 && u.stage === "Completed");
-    const withCost = useCases.filter((u) => (u.costSavings ?? 0) > 0 && u.stage === "Completed");
+    const withTime = useCases.filter((u) => (u.annualTimeSaved ?? 0) > 0 && ["Live","Closed"].includes(u.stage));
+    const withCost = useCases.filter((u) => (u.costSavings ?? 0) > 0 && ["Live","Closed"].includes(u.stage));
     const totalTimeSaved = withTime.reduce((s, u) => s + u.annualTimeSaved, 0);
     const totalCost = withCost.reduce((s, u) => s + u.costSavings, 0);
 
@@ -40,10 +40,10 @@ function Dashboard() {
     const withResolution = useCases.filter((u) => u.resolutionTimeDays != null);
     const avgResolution = withResolution.length ? withResolution.reduce((s, u) => s + (u.resolutionTimeDays ?? 0), 0) / withResolution.length : 0;
 
-    // % proactive: among Completed cases with a binary designation set (100=proactive, 0=reactive, null=unset)
-    const completedWithProactiveData = useCases.filter((u) => u.stage === "Completed" && u.proactivePct != null);
-    const proactiveCount = completedWithProactiveData.filter((u) => u.proactivePct === 100).length;
-    const pctProactive = completedWithProactiveData.length > 0 ? (proactiveCount / completedWithProactiveData.length) * 100 : 0;
+    // % proactive: among Completed cases that are actively monitored (excludes non-applicable / one-and-done)
+    const activelyMonitored = useCases.filter((u) => u.stage === "Live" && !u.liveNonApplicable);
+    const proactiveCount = activelyMonitored.filter((u) => u.proactivePct != null && u.proactivePct > 0).length;
+    const pctProactive = activelyMonitored.length > 0 ? (proactiveCount / activelyMonitored.length) * 100 : 0;
 
     // Avg effort reduction: only cases with real before/after data
     const withEffort = useCases.filter((u) => (u.effortBefore ?? 0) > 0 && (u.effortAfter ?? 0) > 0 && u.effortBefore > u.effortAfter);
@@ -51,7 +51,7 @@ function Dashboard() {
       ? withEffort.reduce((s, u) => s + (u.effortBefore - u.effortAfter), 0) / withEffort.length / 4 * 100
       : 0;
 
-    return { total, active, completed, priority2026, completed2026, pct2026Complete, flagged, totalTimeSaved, totalCost, avgLead, pctProactive, hasProactiveData: completedWithProactiveData.length > 0, avgEffortReduction, avgResolution };
+    return { total, active, live, closed, totalDelivered, priority2026, flagged, totalTimeSaved, totalCost, avgLead, pctProactive, hasProactiveData: activelyMonitored.length > 0, activelyMonitoredCount: activelyMonitored.length, avgEffortReduction, avgResolution };
   }, [useCases]);
 
   const pipelineData = useMemo(() => STAGES.map((stage) => ({
@@ -88,14 +88,14 @@ function Dashboard() {
     <div className="p-8 space-y-8">
       <section>
         <h1 className="text-2xl font-bold tracking-tight">Innovation Pipeline</h1>
-        <p className="text-sm text-slate-500 mt-1 max-w-2xl">Portfolio-wide view of AI, automation, and innovation use cases.</p>
+        <p className="text-sm text-slate-500 mt-1">A real-time AI innovation platform giving leadership visibility into the AI pipeline, post-deployment health monitoring, and dollar and time savings metrics.</p>
       </section>
 
       {/* Row 1: Primary KPIs */}
       <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <Kpi label="Estimated Annual Time Saved" value={fmtHours(stats.totalTimeSaved) + " hrs"} valueClass="text-emerald-600" accent="border-l-4 border-l-emerald-400" onClick={() => setDrilldown({ title: "Annual Time Saved", cases: useCases.filter(u => (u.annualTimeSaved??0) > 0), metricFn: (u) => `${(u.annualTimeSaved??0).toLocaleString()} hrs/yr` })} />
         <Kpi label="Estimated Total Cost Savings" value={fmtMoney(stats.totalCost)} valueClass="text-emerald-600" accent="border-l-4 border-l-emerald-400" onClick={() => setDrilldown({ title: "Cost Savings", cases: useCases.filter(u => (u.costSavings??0) > 0), metricFn: (u) => fmtMoney(u.costSavings) })} />
-        <Kpi label="Completed" value={stats.completed.toString()} sub={`${Math.round(stats.pct2026Complete)}% of 2026 priority`} onClick={() => setDrilldown({ title: "Completed Use Cases", cases: useCases.filter(u => u.stage === "Completed") })} />
+        <Kpi label="Use Cases Delivered" value={`${stats.totalDelivered}`} valueClass="text-emerald-600" sub={`${stats.live} live · ${stats.closed} closed`} onClick={() => setDrilldown({ title: "Delivered Use Cases", cases: useCases.filter(u => ["Live","Closed"].includes(u.stage) || u.lastCompletedAt) })} />
         <Kpi label="Flagged" value={stats.flagged.toString()} valueClass={stats.flagged > 0 ? "text-amber-600" : ""} accent={stats.flagged > 0 ? "border-l-4 border-l-amber-400" : ""} onClick={stats.flagged > 0 ? () => setDrilldown({ title: "Flagged Use Cases", cases: useCases.filter(u => u.status === "Blocked" || u.status === "Action Needed") }) : undefined} />
       </section>
 
@@ -103,18 +103,18 @@ function Dashboard() {
       <section className="mt-2">
 
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-          <KpiCard label="Avg Dev Lead Time" value={stats.avgLead ? `${stats.avgLead.toFixed(0)} days` : "—"} desc="Days from Development to Completed"
+          <KpiCard label="Avg Dev Lead Time" value={stats.avgLead ? `${stats.avgLead.toFixed(0)} days` : "—"} desc="Days from Development to Live"
             onClick={() => {
               const cases = useCases.filter(u => u.devLeadTimeDays != null);
               setDrilldown({ title: "Dev Lead Time", desc: "Days from creation to last modified (Completed cases)", cases,
                 metricFn: (u) => u.devLeadTimeDays != null ? `${u.devLeadTimeDays} days` : null
               });
             }} />
-          <KpiCard label="% Proactive (Completed)" value={stats.hasProactiveData ? fmtPct(stats.pctProactive) : "—"} desc="Of completed use cases, % designated proactive"
+          <KpiCard label="% Proactive" value={stats.hasProactiveData ? fmtPct(stats.pctProactive) : "—"} desc={`${Math.round(stats.pctProactive * stats.activelyMonitoredCount / 100)} of ${stats.activelyMonitoredCount} tracked`}
             onClick={() => {
-              const cases = useCases.filter(u => u.stage === "Completed" && u.proactivePct != null);
-              setDrilldown({ title: "Proactive vs Reactive (Completed)", desc: "Completed use cases with a designation set", cases,
-                metricFn: (u) => u.proactivePct === 100 ? "Proactive" : "Reactive"
+              const cases = useCases.filter(u => u.stage === "Live" && !u.liveNonApplicable);
+              setDrilldown({ title: "Proactive vs Reactive (Tracked)", desc: "Actively monitored completed use cases", cases,
+                metricFn: (u) => u.proactivePct != null && u.proactivePct > 0 ? "Proactive" : "Reactive"
               });
             }} />
           <KpiCard label="Avg Effort Reduction" value={stats.avgEffortReduction > 0 ? fmtPct(stats.avgEffortReduction) : "—"} desc="Owner-rated effort before vs. after"
@@ -149,7 +149,7 @@ function Dashboard() {
                 <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} tickLine={false} axisLine={false} allowDecimals={false} />
                 <Tooltip cursor={{ fill: "rgba(79,70,229,0.06)" }} contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }} />
                 <Bar dataKey="count" radius={[6, 6, 0, 0]} cursor="pointer" onClick={(data) => { if (data?.fullStage) navigate({ to: "/use-cases", search: { stage: data.fullStage } }); }}>
-                  {pipelineData.map((d, i) => <Cell key={d.stage} fill={i < 2 ? "#94a3b8" : i < 5 ? "#4f46e5" : i === 6 ? "#10b981" : "#cbd5e1"} />)}
+                  {pipelineData.map((d, i) => <Cell key={d.stage} fill={i < 2 ? "#94a3b8" : i < 6 ? "#4f46e5" : i < 8 ? "#10b981" : "#cbd5e1"} />)}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -168,6 +168,63 @@ function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* Nearing Completion section */}
+      {(() => {
+        const nearCompletion = useCases.filter(
+          (u) => u.closeToCompletion || u.stage === "Testing & Validation" || u.stage === "Deployment"
+        ).sort((a, b) => {
+          // C-flagged first, then by stage proximity to completion
+          const stageOrder: Record<string, number> = { "Deployment": 0, "Testing & Validation": 1 };
+          const aScore = (a.closeToCompletion ? -10 : 0) + (stageOrder[a.stage] ?? 2);
+          const bScore = (b.closeToCompletion ? -10 : 0) + (stageOrder[b.stage] ?? 2);
+          return aScore - bScore;
+        });
+        if (nearCompletion.length === 0) return null;
+        return (
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-gradient-to-r from-teal-50/50 to-white">
+              <div className="flex items-center gap-2">
+                <span className="size-5 rounded-full bg-teal-500 text-white text-[9px] font-bold flex items-center justify-center">C</span>
+                <h2 className="font-semibold">Nearing Completion</h2>
+                <span className="text-xs text-slate-400 font-normal ml-1">{nearCompletion.length} use case{nearCompletion.length !== 1 ? "s" : ""}</span>
+              </div>
+            </div>
+            <div className="divide-y divide-slate-100">
+              {nearCompletion.map((u) => (
+                <div key={u.id} className="px-6 py-4 hover:bg-slate-50/50 transition-colors">
+                  <div className="flex items-start gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Link to="/use-cases/$id" params={{ id: u.id }} className="font-medium text-sm text-slate-900 hover:text-accent-indigo transition-colors truncate">{u.title}</Link>
+                        {u.closeToCompletion && <span className="size-4 rounded-full bg-teal-500 text-white text-[8px] font-bold flex items-center justify-center shrink-0" title="Close to completion">C</span>}
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-slate-500">
+                        <span className="font-mono text-slate-400">{u.id}</span>
+                        <StageBadge stage={u.stage} />
+                        <span>{u.workgroup}</span>
+                        {u.useCaseOwner && <><span className="text-slate-300">·</span><OwnerAvatar name={u.useCaseOwner} size={16} /><span>{u.useCaseOwner}</span></>}
+                      </div>
+                      {u.statusUpdate ? (
+                        <div className="mt-2 flex items-start gap-1.5 bg-slate-50 rounded-md px-3 py-2">
+                          <MessageSquare className="size-3 text-slate-400 mt-0.5 shrink-0" />
+                          <div className="min-w-0">
+                            <p className="text-xs text-slate-600 leading-snug">{u.statusUpdate}</p>
+                            {u.statusUpdateDate && <p className="text-[10px] text-slate-400 mt-0.5">{new Date(u.statusUpdateDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</p>}
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="mt-2 text-[10px] text-slate-300 italic">No status update</p>
+                      )}
+                    </div>
+                    <FlagBadge status={u.status} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Top Priority table */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -198,24 +255,23 @@ function Dashboard() {
     </div>
 
       {drilldown && (
-        <div className="fixed inset-0 z-50 flex" onClick={() => setDrilldown(null)}>
-          <div className="absolute inset-0 bg-black/30" />
-          <div className="relative ml-auto w-full max-w-2xl bg-white h-full shadow-2xl overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
+        <div className="fixed inset-0 z-50 flex items-start justify-end" onClick={() => setDrilldown(null)}>
+          <div className="absolute inset-0 bg-black/20 backdrop-blur-[2px]" />
+          <div className="relative w-full max-w-xl mt-4 mr-4 mb-4 bg-white rounded-xl border border-slate-200 shadow-xl overflow-hidden flex flex-col" style={{ maxHeight: 'calc(100vh - 2rem)' }} onClick={e => e.stopPropagation()}>
+            <div className="bg-white border-b border-slate-100 px-5 py-3.5 flex items-center justify-between shrink-0">
               <div>
-                <h2 className="font-semibold text-slate-900">{drilldown.title}</h2>
-                <p className="text-xs text-slate-400 mt-0.5">{drilldown.cases.length} use case{drilldown.cases.length !== 1 ? "s" : ""}{drilldown.desc && ` · ${drilldown.desc}`}</p>
+                <h2 className="font-semibold text-sm text-slate-900">{drilldown.title}</h2>
+                <p className="text-[10px] text-slate-400 mt-0.5 uppercase tracking-wider font-medium">{drilldown.cases.length} use case{drilldown.cases.length !== 1 ? "s" : ""}{drilldown.desc && ` · ${drilldown.desc}`}</p>
               </div>
-              <button onClick={() => setDrilldown(null)} className="text-slate-400 hover:text-slate-600"><X className="size-5" /></button>
+              <button onClick={() => setDrilldown(null)} className="text-slate-400 hover:text-slate-600 transition-colors rounded-md hover:bg-slate-100 p-1"><X className="size-4" /></button>
             </div>
-            <div className="divide-y divide-slate-100">
+            <div className="divide-y divide-slate-50 overflow-y-auto flex-1">
               {drilldown.cases.map(u => (
-                <div key={u.id} className="px-6 py-4 hover:bg-slate-50 transition-colors">
+                <div key={u.id} className="px-5 py-3 hover:bg-slate-50/60 transition-colors">
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs font-mono text-slate-400">{u.id}</p>
-                      <a href={`/use-cases/${u.id}`} className="text-sm font-medium text-slate-900 hover:text-accent-indigo">{u.title}</a>
-                      <p className="text-xs text-slate-500 mt-1">{u.workgroup} · {u.stage}</p>
+                      <Link to="/use-cases/$id" params={{ id: u.id }} className="text-sm font-medium text-slate-900 hover:text-accent-indigo transition-colors">{u.title}</Link>
+                      <p className="text-[10px] text-slate-400 mt-0.5">{u.workgroup} · {u.stage}</p>
                     </div>
                     <div className="text-right text-xs text-slate-500 shrink-0">
                       {drilldown.metricFn

@@ -45,7 +45,7 @@ async function getUseCaseContext(): Promise<string> {
            technical_lead, category, tags, solution_type, data_source,
            vendor, complexity, risk, priority, description,
            annual_time_saved, cost_savings, dev_lead_time_days,
-           development_started_at, last_completed_at, notes
+           development_started_at, last_completed_at
     FROM public.use_cases
     ORDER BY title
   `);
@@ -73,7 +73,6 @@ async function getUseCaseContext(): Promise<string> {
     if (r.dev_lead_time_days) parts.push(`Dev Lead Time: ${r.dev_lead_time_days} days`);
     if (r.complexity) parts.push(`Complexity: ${r.complexity}/5`);
     if (r.risk) parts.push(`Risk: ${r.risk}/5`);
-    if (r.notes) parts.push(`Notes: ${r.notes}`);
     return parts.join(" | ");
   });
 
@@ -92,10 +91,10 @@ Rules for how you respond:
 - If asked "what's close to completion" — explain what stage they're in and why that means they're close, name a few examples.
 - If a question is vague, give the most useful interpretation rather than asking for clarification.
 - You can reference workgroups, owners, vendors, stages, statuses, priorities, time savings, and cost savings from the data.
-- Stages in order: Submitted → Intake → Discovery → Development → Testing & Validation → Completed (Archive = paused/on hold)
+- Stages in order: Submitted → Intake → Discovery → Development → Testing & Validation → Deployment → Live or Closed (Archive = paused/on hold)
 
 Example good response:
-"There are 7 use cases in Testing & Validation right now — the last stage before completion. A few highlights: **Delay Code Recommendation** (Stations), **TRAX Copilot Agents** (M&E), and **Investigation Report Writing** (Back Office). These are all actively being validated and should move to Completed soon."
+"There are 7 use cases in Testing & Validation right now — the last stage before completion. A few highlights: **Delay Code Recommendation** (Stations), **TRAX Copilot Agents** (M&E), and **Investigation Report Writing** (Back Office). These are all actively being validated and should move to Live soon."
 
 Example bad response:
 "| ID | Title | Stage |\n|---|---|---|\n| UC-0067 | Delay code recommendation | Testing & Validation |" (Never do this)

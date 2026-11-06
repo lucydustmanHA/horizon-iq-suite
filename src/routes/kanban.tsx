@@ -1,5 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Link2 } from "lucide-react";
+import { $getLinkCounts } from "../lib/use-cases.server";
 import {
   DndContext,
   DragOverlay,
@@ -34,6 +36,11 @@ function KanbanPage() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [wg, setWg] = useState<string>("all");
   const [viewMode, setViewMode] = useState<"board"|"list">("board");
+  const [linkCounts, setLinkCounts] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    $getLinkCounts().then(setLinkCounts).catch(console.error);
+  }, []);
 
   const filtered = useMemo(
     () => useCases.filter((u) => wg === "all" || u.workgroup === wg),
@@ -89,11 +96,11 @@ function KanbanPage() {
         <div className="flex-1 overflow-x-auto">
           <div className="flex gap-4 min-w-max h-full pb-4">
             {STAGES.map((stage) => (
-              <Column key={stage} stage={stage} items={byStage[stage]} />
+              <Column key={stage} stage={stage} items={byStage[stage]} linkCounts={linkCounts} />
             ))}
           </div>
         </div>
-        <DragOverlay>{activeCase ? <Card u={activeCase} dragging /> : null}</DragOverlay>
+        <DragOverlay>{activeCase ? <Card u={activeCase} dragging linkCount={linkCounts[activeCase.id] ?? 0} /> : null}</DragOverlay>
       </DndContext>}
     </div>
   );
@@ -136,7 +143,7 @@ function KanbanList({ byStage }: { byStage: Record<string, import("../lib/types"
   );
 }
 
-function Column({ stage, items }: { stage: Stage; items: UseCase[] }) {
+function Column({ stage, items, linkCounts }: { stage: Stage; items: UseCase[]; linkCounts: Record<string, number> }) {
   const { setNodeRef, isOver } = useDroppable({ id: stage });
   const [collapsed, setCollapsed] = useState(() => stage === "Submitted" || stage === "Archive");
   if (collapsed) {
@@ -169,13 +176,13 @@ function Column({ stage, items }: { stage: Stage; items: UseCase[] }) {
         </div>
       </div>
       <div className="space-y-2 flex-1 overflow-y-auto pr-1">
-        {items.map((u) => <DraggableCard key={u.id} u={u} />)}
+        {items.map((u) => <DraggableCard key={u.id} u={u} linkCount={linkCounts[u.id] ?? 0} />)}
       </div>
     </div>
   );
 }
 
-function DraggableCard({ u }: { u: UseCase }) {
+function DraggableCard({ u, linkCount = 0 }: { u: UseCase; linkCount?: number }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: u.id });
   return (
     <div
@@ -184,12 +191,12 @@ function DraggableCard({ u }: { u: UseCase }) {
       {...attributes}
       style={{ opacity: isDragging ? 0.3 : 1 }}
     >
-      <Card u={u} />
+      <Card u={u} linkCount={linkCount} />
     </div>
   );
 }
 
-function Card({ u, dragging = false }: { u: UseCase; dragging?: boolean }) {
+function Card({ u, dragging = false, linkCount = 0 }: { u: UseCase; dragging?: boolean; linkCount?: number }) {
   return (
     <div
       className={
@@ -209,9 +216,15 @@ function Card({ u, dragging = false }: { u: UseCase; dragging?: boolean }) {
         </Link>
         <PriorityBadge priority={u.priority} />
       </div>
-      <p className="text-[10px] font-mono text-slate-400 mt-1">{u.id} · {u.workgroup}</p>
+      <div className="flex items-center gap-2 mt-1">
+        <p className="text-[10px] font-mono text-slate-400">{u.id} · {u.workgroup}</p>
+        {linkCount > 0 && <span className="inline-flex items-center gap-0.5 text-[10px] text-teal-600 bg-teal-50 px-1.5 py-0.5 rounded-full font-medium"><Link2 className="size-2.5" />{linkCount}</span>}
+      </div>
       <div className="mt-3 flex items-center justify-between">
-<FlagBadge status={u.status} />
+        <div className="flex items-center gap-1.5">
+          <FlagBadge status={u.status} />
+          {u.closeToCompletion && <span className="size-5 rounded-full bg-teal-500 text-white text-[9px] font-bold flex items-center justify-center" title="Close to completion">C</span>}
+        </div>
         <OwnerAvatar name={u.useCaseOwner} size={22} />
       </div>
     </div>

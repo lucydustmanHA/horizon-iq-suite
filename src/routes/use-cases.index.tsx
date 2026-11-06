@@ -82,10 +82,31 @@ function UseCasesPage() {
     return sortDir === "desc" ? sorted.reverse() : sorted;
   }, [globalFiltered, q, wg, stage, statusFilter, sortKey, sortDir]);
 
+  const RAG_DESCS: Record<string, string> = {
+    green: "Live and on track",
+    orange: "Live and closely monitoring",
+    red: "Live and action needed",
+  };
+  function ragDescription(u: typeof rows[0]) {
+    if (u.stage !== "Live" && u.stage !== "Closed") return "";
+    if (u.reviewCycle === "One-and-Done") return "Live but no tracking necessary";
+    const rag = (u as any).ragStatus as string | undefined;
+    if (rag && RAG_DESCS[rag]) return RAG_DESCS[rag];
+    return "Live";
+  }
+  function csvSafe(v: unknown) { const s = String(v ?? ""); return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s; }
   function exportCSV() {
-    const headers = ["id","title","workgroup","stage","flag","priority","owner","annualHoursSaved","costSavings"];
+    const headers = ["id","title","workgroup","stage","flag","priority","owner","annualHoursSaved","costSavings","reviewCycle","approach","ragDescription","statusUpdate","description"];
     const lines = [headers.join(",")];
-    for (const u of rows) lines.push([u.id,JSON.stringify(u.title),u.workgroup,u.stage,u.status,u.priority,JSON.stringify(u.useCaseOwner),u.annualTimeSaved,u.costSavings].join(","));
+    for (const u of rows) {
+      const approach = u.proactivePct === 100 ? "Proactive" : u.proactivePct === 0 ? "Reactive" : "";
+      lines.push([
+        u.id, csvSafe(u.title), csvSafe(u.workgroup), u.stage, u.status, u.priority,
+        csvSafe(u.useCaseOwner), u.annualTimeSaved, u.costSavings,
+        csvSafe(u.reviewCycle ?? ""), approach, csvSafe(ragDescription(u)),
+        csvSafe(u.statusUpdate), csvSafe(u.description)
+      ].join(","));
+    }
     const blob = new Blob([lines.join("\n")], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = "use-cases.csv"; a.click(); URL.revokeObjectURL(url);
@@ -154,7 +175,7 @@ function UseCasesPage() {
               {rows.map((u) => (
                 <tr key={u.id} className={"transition-colors " + flagRowClass(u.status)}>
                   <td className="px-4 py-3 font-mono text-[11px] text-slate-500">{u.id}</td>
-                  <td className="px-4 py-3"><Link to="/use-cases/$id" params={{ id: u.id }} className="font-medium text-sm text-slate-900 hover:text-accent-indigo">{u.title}</Link><p className="text-xs text-slate-500 line-clamp-1">{u.description}</p></td>
+                  <td className="px-4 py-3"><div className="flex items-center gap-1.5"><Link to="/use-cases/$id" params={{ id: u.id }} className="font-medium text-sm text-slate-900 hover:text-accent-indigo">{u.title}</Link>{u.closeToCompletion && <span className="size-4 rounded-full bg-teal-500 text-white text-[8px] font-bold flex items-center justify-center shrink-0" title="Close to completion">C</span>}</div><p className="text-xs text-slate-500 line-clamp-1">{u.description}</p></td>
                   <td className="px-4 py-3"><StageBadge stage={u.stage} /></td>
                   
                   <td className="px-4 py-3"><PriorityBadge priority={u.priority} /></td>

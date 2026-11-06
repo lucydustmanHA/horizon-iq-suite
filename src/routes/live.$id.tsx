@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect, useRef } from "react";
-import { ChevronLeft, Pencil, Check, X, Link2, Plus, CheckSquare, Square, Trash2, Paperclip, Star, Save } from "lucide-react";
+import { ChevronLeft, Pencil, Check, X, Link2, Plus, CheckSquare, Square, Trash2, Paperclip, CalendarDays, MessageSquare } from "lucide-react";
 import { NotesEditor } from "../components/notes-editor";
 import { Button } from "../components/ui/button";
 import { toast } from "sonner";
@@ -12,10 +12,11 @@ import { OwnerAvatar, StageBadge, FlagBadge } from "../components/badges";
 import { usePortfolio } from "../lib/store";
 import { STAGES, STATUSES, WORKGROUPS, BUSINESS_AREAS, STRATEGIC_FOCUSES, GROUPINGS, VENDORS, SOLUTION_TYPES, TIME_UNITS, type Stage, type Status, type TodoItem, type Effort } from "../lib/types";
 import type { LiveMetric, LiveMonitoring } from "../lib/live-mock-data";
-import { METRIC_UNITS, ROLLUP_OPTIONS, CADENCE_OPTIONS } from "../lib/live-mock-data";
-import { $getTodos, $addTodo, $updateTodo, $deleteTodo, $saveNotes } from "../lib/use-cases.server";
-import { $getMonitoring, $upsertMonitoring, $getMetrics, $addMetric, $updateMetric, $deleteMetric, $toggleNonApplicable } from "../lib/live.server";
+import { $getTodos, $addTodo, $updateTodo, $deleteTodo, $saveNotes, $postStatusUpdate } from "../lib/use-cases.server";
+import { $getMonitoring, $upsertMonitoring, $getMetrics, $updateReviewCycle } from "../lib/live.server";
+import { normalizeReviewCycle } from "../lib/live-review-utils";
 import { $upsertSettingOption } from "../lib/settings.server";
+import { PostDeploymentSection, MetricsTab } from "../components/post-deployment-section";
 
 const ANNUAL_MULTIPLIER: Record<string, number> = { day: 260, week: 52, month: 12, quarter: 4, year: 1, once: 1 };
 function calcAnnual(value: number, unit: string) { return Math.round(value * (ANNUAL_MULTIPLIER[unit] ?? 12)); }
@@ -113,11 +114,12 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
 
 
 
-function TodoRow({ todo, onToggle, onDelete, onUpdateText, onUpdateAssignee }: { todo:TodoItem; onToggle:()=>void; onDelete:()=>void; onUpdateText:(v:string)=>void; onUpdateAssignee:(v:string)=>void }) {
+function TodoRow({ todo, onToggle, onDelete, onUpdateText, onUpdateAssignee, onUpdateDueDate }: { todo:TodoItem; onToggle:()=>void; onDelete:()=>void; onUpdateText:(v:string)=>void; onUpdateAssignee:(v:string)=>void; onUpdateDueDate?:(v:string|null)=>void }) {
   const [editText, setEditText] = useState(false);
   const [editAssignee, setEditAssignee] = useState(false);
   const [tDraft, setTDraft] = useState(todo.text);
   const [aDraft, setADraft] = useState(todo.assignee);
+  const isOverdue = todo.dueDate && !todo.done && new Date(todo.dueDate + "T23:59:59") < new Date();
   useEffect(()=>{ setTDraft(todo.text); setADraft(todo.assignee); },[todo.text,todo.assignee]);
   return (
     <li className="flex items-start gap-2 group rounded-lg p-2 hover:bg-slate-50 transition-colors">
@@ -127,10 +129,18 @@ function TodoRow({ todo, onToggle, onDelete, onUpdateText, onUpdateAssignee }: {
           ? <input autoFocus value={tDraft} onChange={(e)=>setTDraft(e.target.value)} className="text-sm w-full border-b border-accent-indigo outline-none bg-transparent" onBlur={()=>{ setEditText(false); if(tDraft.trim()!==todo.text)onUpdateText(tDraft.trim()); }} onKeyDown={(e)=>{ if(e.key==="Enter"){setEditText(false);if(tDraft.trim()!==todo.text)onUpdateText(tDraft.trim());} if(e.key==="Escape"){setEditText(false);setTDraft(todo.text);} }} />
           : <p className={`text-sm cursor-pointer ${todo.done?"line-through text-slate-400":"text-slate-900"}`} onClick={()=>setEditText(true)}>{todo.text||<span className="italic text-slate-300">untitled</span>}</p>
         }
-        {editAssignee
-          ? <input autoFocus value={aDraft} onChange={(e)=>setADraft(e.target.value)} placeholder="Assigned to…" className="text-xs w-full border-b border-accent-indigo outline-none bg-transparent text-slate-500 mt-0.5" onBlur={()=>{ setEditAssignee(false); if(aDraft!==todo.assignee)onUpdateAssignee(aDraft); }} onKeyDown={(e)=>{ if(e.key==="Enter"){setEditAssignee(false);if(aDraft!==todo.assignee)onUpdateAssignee(aDraft);} if(e.key==="Escape"){setEditAssignee(false);setADraft(todo.assignee);} }} />
-          : <p className="text-xs text-slate-400 mt-0.5 cursor-pointer hover:text-accent-indigo" onClick={()=>setEditAssignee(true)}>{todo.assignee?`→ ${todo.assignee}`:<span className="italic opacity-50">unassigned</span>}</p>
-        }
+        <div className="flex items-center gap-2 mt-0.5">
+          {editAssignee
+            ? <input autoFocus value={aDraft} onChange={(e)=>setADraft(e.target.value)} placeholder="Assigned to…" className="text-xs border-b border-accent-indigo outline-none bg-transparent text-slate-500" onBlur={()=>{ setEditAssignee(false); if(aDraft!==todo.assignee)onUpdateAssignee(aDraft); }} onKeyDown={(e)=>{ if(e.key==="Enter"){setEditAssignee(false);if(aDraft!==todo.assignee)onUpdateAssignee(aDraft);} if(e.key==="Escape"){setEditAssignee(false);setADraft(todo.assignee);} }} />
+            : <span className="text-xs text-slate-400 cursor-pointer hover:text-accent-indigo" onClick={()=>setEditAssignee(true)}>{todo.assignee?`→ ${todo.assignee}`:<span className="italic opacity-50">unassigned</span>}</span>
+          }
+          {onUpdateDueDate && (
+            <label className={`inline-flex items-center gap-1 text-xs cursor-pointer transition-colors ${isOverdue ? "text-red-500 font-medium" : todo.dueDate ? "text-slate-500" : "text-slate-300 hover:text-slate-400"}`}>
+              <CalendarDays className="size-3" />
+              <input type="date" value={todo.dueDate ?? ""} onChange={(e) => onUpdateDueDate(e.target.value || null)} className="bg-transparent border-0 outline-none text-xs p-0 w-24 cursor-pointer" />
+            </label>
+          )}
+        </div>
       </div>
       <button onClick={onDelete} className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-status-danger transition-all mt-0.5 shrink-0"><Trash2 className="size-3.5"/></button>
     </li>
@@ -195,6 +205,7 @@ function LiveDetailPage() {
   const [todosLoaded, setTodosLoaded] = useState(false);
   const [newTodoText, setNewTodoText] = useState("");
   const [newTodoAssignee, setNewTodoAssignee] = useState("");
+  const [newTodoDue, setNewTodoDue] = useState("");
 
   // Live/monitoring state
   const [monitoring, setMonitoring] = useState<LiveMonitoring | null>(null);
@@ -208,6 +219,9 @@ function LiveDetailPage() {
   const [notes, setNotes] = useState("");
   const [notesSaving, setNotesSaving] = useState(false);
   const notesSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [editingStatus, setEditingStatus] = useState(false);
+  const [statusDraft, setStatusDraft] = useState("");
+  const [statusSaving, setStatusSaving] = useState(false);
 
   useEffect(() => {
     $getTodos({ data: { useCaseId: id } }).then((t) => { setTodos(t); setTodosLoaded(true); });
@@ -236,7 +250,7 @@ function LiveDetailPage() {
   );
 
   const save = (patch: Parameters<typeof updateUseCase>[1]) => updateUseCase(useCase.id, patch);
-  const isDeploymentPlus = ["Deployment","Completed"].includes(useCase.stage);
+  const isDeploymentPlus = ["Deployment","Live","Closed"].includes(useCase.stage);
   const annualCalc = calcAnnual(useCase.timeSavedValue ?? 0, useCase.timeSavedUnit ?? "month");
   const priorityLabel = useCase.priority === 1 ? "2026" : useCase.priority === 2 ? "2027+" : "—";
 
@@ -254,12 +268,12 @@ function LiveDetailPage() {
   const handleAddTodo = async () => {
     const text = newTodoText.trim();
     if (!text) return;
-    const t = await $addTodo({ data: { useCaseId: id, text, assignee: newTodoAssignee.trim() } });
+    const t = await $addTodo({ data: { useCaseId: id, text, assignee: newTodoAssignee.trim(), dueDate: newTodoDue || undefined } });
     setTodos((prev) => [...prev, t]);
     if (!useCase.status || (useCase.status !== "Blocked" && useCase.status !== "Action Needed")) {
       save({ status: "Action Needed" });
     }
-    setNewTodoText(""); setNewTodoAssignee("");
+    setNewTodoText(""); setNewTodoAssignee(""); setNewTodoDue("");
   };
   const handleToggle = async (t: TodoItem) => {
     const nowDone = !t.done;
@@ -297,7 +311,7 @@ function LiveDetailPage() {
           <div className="flex-1 min-w-0">
             <p className="text-xs font-mono text-slate-400 mb-1">{useCase.id}</p>
             <h1 className="text-2xl font-bold tracking-tight">{useCase.title}</h1>
-            {useCase.description && <p className="text-sm text-slate-600 mt-2 max-w-3xl">{useCase.description}</p>}
+            {useCase.description && <p className="text-sm text-slate-600 mt-2">{useCase.description}</p>}
           </div>
           <div className="flex flex-col items-end gap-2 shrink-0">
             <StageBadge stage={useCase.stage} />
@@ -320,6 +334,45 @@ function LiveDetailPage() {
         </div>
       </header>
 
+      {/* Status Update blurb */}
+      <div className="border border-slate-200 rounded-lg bg-slate-50/50 px-4 py-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-2 flex-1 min-w-0">
+            <MessageSquare className="size-4 text-slate-400 mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              {editingStatus ? (
+                <div className="space-y-2">
+                  <textarea autoFocus value={statusDraft} onChange={(e) => setStatusDraft(e.target.value)} rows={2} placeholder="What's the latest on this use case?" className="w-full text-sm border border-slate-200 rounded-md px-3 py-2 bg-white focus:outline-none focus:ring-1 focus:ring-accent-indigo/40 resize-none" onKeyDown={(e) => { if (e.key === "Escape") { setEditingStatus(false); setStatusDraft(""); } }} />
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" className="h-7 text-xs bg-accent-indigo hover:bg-accent-indigo/90 text-white" disabled={!statusDraft.trim() || statusSaving} onClick={async () => {
+                      setStatusSaving(true);
+                      try {
+                        const result = await $postStatusUpdate({ data: { id: useCase.id, update: statusDraft.trim() } });
+                        if (result.ok) {
+                          save({ statusUpdate: result.statusUpdate, statusUpdateDate: result.statusUpdateDate, notes: result.notes } as any);
+                          setEditingStatus(false); setStatusDraft("");
+                        }
+                      } finally { setStatusSaving(false); }
+                    }}>{statusSaving ? "Saving..." : "Post Update"}</Button>
+                    <button className="text-xs text-slate-400 hover:text-slate-600" onClick={() => { setEditingStatus(false); setStatusDraft(""); }}>Cancel</button>
+                  </div>
+                </div>
+              ) : useCase.statusUpdate ? (
+                <div>
+                  <p className="text-sm text-slate-700">{useCase.statusUpdate}</p>
+                  <p className="text-[10px] text-slate-400 mt-1">{useCase.statusUpdateDate ? new Date(useCase.statusUpdateDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : ""}</p>
+                </div>
+              ) : (
+                <p className="text-sm text-slate-400 italic">No status update yet</p>
+              )}
+            </div>
+          </div>
+          {!editingStatus && (
+            <button onClick={() => { setStatusDraft(""); setEditingStatus(true); }} className="text-xs text-slate-400 hover:text-accent-indigo shrink-0 flex items-center gap-1 transition-colors"><Pencil className="size-3" /> {useCase.statusUpdate ? "Update" : "Add"}</button>
+          )}
+        </div>
+      </div>
+
       {/* Starred KPI cards */}
       {(() => {
         const starred = metrics.filter((m) => m.starred);
@@ -334,10 +387,13 @@ function LiveDetailPage() {
                 : m.rollup === "sum" ? vals.reduce((a, b) => a + b, 0)
                 : m.rollup === "min" ? Math.min(...vals) : Math.max(...vals)
                 : null;
+              const meetsTarget = m.target === null || rv === null ? true
+                : m.direction === "down" ? rv <= m.target : rv >= m.target;
+              const valueColor = rv === null ? "text-slate-400" : meetsTarget ? "text-teal-600" : "text-red-600";
               return (
                 <div key={m.id} className="bg-white border border-slate-200 rounded-xl p-4 min-w-[140px] shadow-sm">
                   <p className="text-[10px] font-semibold text-slate-500 uppercase mb-1">{m.metricName}</p>
-                  <p className="text-2xl font-bold text-teal-600">{rv !== null ? `${rv.toFixed(1)}${m.unit === "%" ? "%" : ""}` : "—"}</p>
+                  <p className={`text-2xl font-bold ${valueColor}`}>{rv !== null ? `${rv.toFixed(1)}${m.unit === "%" ? "%" : ""}` : "—"}</p>
                   {m.target !== null && <p className="text-xs text-slate-400 mt-1">target {m.direction === "down" ? "≤" : "≥"} {m.target}</p>}
                 </div>
               );
@@ -354,9 +410,7 @@ function LiveDetailPage() {
           <TabsTrigger value="metrics">Metrics</TabsTrigger>
           <TabsTrigger value="todos">To-Dos{openTodoCount > 0 ? ` (${openTodoCount})` : ""}</TabsTrigger>
           <TabsTrigger value="notes">Notes</TabsTrigger>
-          <TabsTrigger value="activity">Activity</TabsTrigger>
           <TabsTrigger value="files">Files & Links{useCase.links.length > 0 ? ` (${useCase.links.length})` : ""}</TabsTrigger>
-          <TabsTrigger value="comments">Comments{useCase.comments.length > 0 ? ` (${useCase.comments.length})` : ""}</TabsTrigger>
         </TabsList>
 
         {/* POST-DEPLOYMENT TAB with sub-tabs */}
@@ -365,7 +419,8 @@ function LiveDetailPage() {
             useCaseId={id}
             monitoring={monitoring}
             monDesc={monDesc} setMonDesc={setMonDesc}
-            monCadence={monCadence} setMonCadence={setMonCadence}
+            reviewCycle={normalizeReviewCycle(useCase.reviewCycle)}
+            onReviewCycleChange={(v) => { save({ reviewCycle: v }); $updateReviewCycle({ data: { useCaseId: id, reviewCycle: v } }).catch(console.error); }}
             monOwner={monOwner} setMonOwner={setMonOwner}
             monSaving={monSaving} saveMonitoring={saveMonitoring}
             metrics={metrics} setMetrics={setMetrics}
@@ -401,6 +456,7 @@ function LiveDetailPage() {
                 <TodoRow key={t.id} todo={t} onToggle={() => handleToggle(t)} onDelete={() => handleDeleteTodo(t.id)}
                   onUpdateText={(v) => { setTodos(todos.map((x) => x.id === t.id ? { ...x, text: v } : x)); $updateTodo({ data: { id: t.id, text: v } }); }}
                   onUpdateAssignee={(v) => { setTodos(todos.map((x) => x.id === t.id ? { ...x, assignee: v } : x)); $updateTodo({ data: { id: t.id, assignee: v } }); }}
+                  onUpdateDueDate={(v) => { setTodos(todos.map((x) => x.id === t.id ? { ...x, dueDate: v } : x)); $updateTodo({ data: { id: t.id, dueDate: v } }); }}
                 />
               ))}
             </ul>
@@ -408,6 +464,7 @@ function LiveDetailPage() {
             <div className="flex gap-2 pt-4 border-t border-slate-100 mt-4">
               <Input value={newTodoText} onChange={(e) => setNewTodoText(e.target.value)} placeholder="New to-do…" className="flex-1 h-9 text-sm" onKeyDown={(e) => e.key === "Enter" && handleAddTodo()} />
               <Input value={newTodoAssignee} onChange={(e) => setNewTodoAssignee(e.target.value)} placeholder="Owner" className="w-32 h-9 text-sm" onKeyDown={(e) => e.key === "Enter" && handleAddTodo()} />
+              <Input type="date" value={newTodoDue} onChange={(e) => setNewTodoDue(e.target.value)} className="w-36 h-9 text-sm" title="Due date (optional)" />
               <Button variant="outline" size="sm" className="h-9 gap-1" onClick={handleAddTodo}><Plus className="size-3" /> Add</Button>
             </div>
           </div>
@@ -485,6 +542,11 @@ function LiveDetailPage() {
             </Panel>
           )}
           {!isDeploymentPlus && <p className="text-xs text-slate-400 italic px-1">Proactive vs Reactive will appear once this use case moves to Deployment stage.</p>}
+
+          {/* Custom metrics table (moved from post-deployment sub-tab) */}
+          <div className="mt-6">
+            <MetricsTab useCaseId={id} metrics={metrics} setMetrics={setMetrics} />
+          </div>
         </TabsContent>
 
         <TabsContent value="notes">
@@ -497,17 +559,6 @@ function LiveDetailPage() {
           </div>
         </TabsContent>
 
-        {/* ACTIVITY TAB */}
-        <TabsContent value="activity">
-          <Panel title="Activity Timeline">
-            <ol className="relative border-l border-slate-200 ml-2 space-y-6 pt-2">
-              {[...useCase.activity].reverse().map((a)=>(
-                <li key={a.id} className="pl-6 relative group"><span className="absolute -left-[7px] top-1 size-3 rounded-full bg-white border-2 border-accent-indigo" /><div className="flex items-start justify-between"><div><p className="text-xs text-slate-400 font-medium">{new Date(a.timestamp).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})} · {fmtRel(a.timestamp)}</p><p className="text-sm text-slate-900 mt-0.5">{a.message}</p>{a.actor&&<p className="text-[11px] text-slate-500">by {a.actor}</p>}</div><button onClick={()=>deleteActivity(useCase.id,a.id)} className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-status-danger transition-all shrink-0"><Trash2 className="size-3" /></button></div></li>
-              ))}
-            </ol>
-          </Panel>
-        </TabsContent>
-
         {/* FILES & LINKS TAB */}
         <TabsContent value="files">
           <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
@@ -515,339 +566,11 @@ function LiveDetailPage() {
           </div>
         </TabsContent>
 
-        {/* COMMENTS TAB */}
-        <TabsContent value="comments">
-          <Panel title="Discussion">
-            <div className="space-y-4">
-              {useCase.comments.map((c)=>(
-                <div key={c.id} className="flex gap-3 group">
-                  <OwnerAvatar name={c.author} size={28} />
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-slate-900">{c.author}</span>
-                      <span className="text-xs text-slate-400">{fmtRel(c.timestamp)}</span>
-                      <button onClick={()=>deleteComment(useCase.id,c.id)} className="opacity-0 group-hover:opacity-100 ml-auto text-slate-300 hover:text-status-danger transition-all"><Trash2 className="size-3" /></button>
-                    </div>
-                    <p className="text-sm text-slate-700 mt-1">{c.text}</p>
-                  </div>
-                </div>
-              ))}
-              <div className="border-t border-slate-100 pt-4">
-                <Textarea placeholder="Write a comment…" value={comment} onChange={(e)=>setComment(e.target.value)} rows={3} />
-                <div className="mt-2 flex justify-end"><Button size="sm" className="bg-accent-indigo hover:bg-accent-indigo/90 text-white" onClick={()=>{ if(!comment.trim())return; addComment(useCase.id,comment.trim()); setComment(""); }}>Post comment</Button></div>
-              </div>
-            </div>
-          </Panel>
-        </TabsContent>
+
       </Tabs>
       
 
     </div>
-  );
-}
-
-// ============================================================================
-// Post-Deployment Section (sub-tabs: Process, Metrics)
-// ============================================================================
-function PostDeploymentSection({ useCaseId, monitoring, monDesc, setMonDesc, monCadence, setMonCadence, monOwner, setMonOwner, monSaving, saveMonitoring, metrics, setMetrics }: {
-  useCaseId: string;
-  monitoring: LiveMonitoring | null;
-  monDesc: string; setMonDesc: (v: string) => void;
-  monCadence: string; setMonCadence: (v: string) => void;
-  monOwner: string; setMonOwner: (v: string) => void;
-  monSaving: boolean; saveMonitoring: () => void;
-  metrics: LiveMetric[]; setMetrics: (m: LiveMetric[]) => void;
-}) {
-  const [subTab, setSubTab] = useState<"process"|"metrics">("process");
-
-  return (
-    <div className="space-y-4">
-      <div className="flex gap-1 border-b border-slate-200">
-        <button onClick={() => setSubTab("process")} className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${subTab === "process" ? "border-accent-indigo text-accent-indigo" : "border-transparent text-slate-500 hover:text-slate-700"}`}>Process</button>
-        <button onClick={() => setSubTab("metrics")} className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${subTab === "metrics" ? "border-accent-indigo text-accent-indigo" : "border-transparent text-slate-500 hover:text-slate-700"}`}>Metrics</button>
-      </div>
-
-      {subTab === "process" && (
-        <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-4">
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Post-Deployment Monitoring Process</p>
-            <Button variant="outline" size="sm" className="gap-1" onClick={saveMonitoring} disabled={monSaving}>
-              <Save className="size-3" />{monSaving ? "Saving…" : "Save"}
-            </Button>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs font-medium text-slate-500 mb-1 block">Cadence</label>
-              <Select value={monCadence} onValueChange={setMonCadence}>
-                <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>{CADENCE_OPTIONS.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-slate-500 mb-1 block">Monitoring Owner</label>
-              <Input value={monOwner} onChange={(e) => setMonOwner(e.target.value)} placeholder="Owner name" className="h-9 text-sm" />
-            </div>
-          </div>
-          <div>
-            <label className="text-xs font-medium text-slate-500 mb-1 block">How We Monitor</label>
-            <NotesEditor value={monDesc} onChange={setMonDesc} />
-          </div>
-        </div>
-      )}
-
-      {subTab === "metrics" && (
-        <MetricsTab useCaseId={useCaseId} metrics={metrics} setMetrics={setMetrics} />
-      )}
-    </div>
-  );
-}
-
-// ============================================================================
-// Metrics Tab - editable table with period columns
-// ============================================================================
-
-// ── Sparkline (SVG mini trend chart) ──────────────────────────────────────────
-
-function MetricsTab({ useCaseId, metrics, setMetrics }: {
-  useCaseId: string; metrics: LiveMetric[]; setMetrics: (m: LiveMetric[]) => void;
-}) {
-  const [newName, setNewName] = useState("");
-  const [newPeriod, setNewPeriod] = useState("");
-  const storageKey = `qx-metrics-cols-${useCaseId}`;
-  const [periodColumns, setPeriodColumnsRaw] = useState<string[]>(() => {
-    try { const saved = localStorage.getItem(storageKey); return saved ? JSON.parse(saved) : []; } catch { return []; }
-  });
-  const setPeriodColumns = (cols: string[]) => {
-    setPeriodColumnsRaw(cols);
-    localStorage.setItem(storageKey, JSON.stringify(cols));
-  };
-  const [dragIdx, setDragIdx] = useState<number | null>(null);
-
-  // Merge DB periods + manually added columns (new columns appear at the right)
-  const dbPeriods = Array.from(new Set(metrics.flatMap((m) => Object.keys(m.periodValues))));
-  const allPeriods = [...dbPeriods.filter((p) => !periodColumns.includes(p)), ...periodColumns];
-  // Remove duplicates while preserving order
-  const displayPeriods = Array.from(new Set(allPeriods));
-
-  const addRow = async () => {
-    if (!newName.trim()) return;
-    const m = await $addMetric({ data: { useCaseId, metricName: newName.trim(), unit: "%", target: null, starred: false } });
-    setMetrics([...metrics, m]);
-    setNewName("");
-  };
-
-  const addPeriodColumn = () => {
-    const col = newPeriod.trim();
-    if (!col || displayPeriods.includes(col)) return;
-    setPeriodColumns([...periodColumns, col]);
-    setNewPeriod("");
-  };
-
-  const deletePeriodColumn = (col: string) => {
-    // Remove from manual columns
-    setPeriodColumns(periodColumns.filter((c) => c !== col));
-    // Remove values from all metrics for this period
-    const updated = metrics.map((m) => {
-      const newVals = { ...m.periodValues };
-      delete newVals[col];
-      return { ...m, periodValues: newVals };
-    });
-    setMetrics(updated);
-    // Persist each metric's periodValues
-    updated.forEach((m) => {
-      $updateMetric({ data: { id: m.id, periodValues: m.periodValues } });
-    });
-  };
-
-  const toggleStar = async (m: LiveMetric) => {
-    // Optimistic update first for instant feedback
-    const newStarred = !m.starred;
-    setMetrics(metrics.map((x) => x.id === m.id ? { ...x, starred: newStarred } : x));
-    // Then persist
-    try {
-      await $updateMetric({ data: { id: m.id, starred: newStarred } });
-    } catch (err) {
-      // Revert on failure
-      console.error("Failed to update star:", err);
-      setMetrics(metrics.map((x) => x.id === m.id ? { ...x, starred: m.starred } : x));
-    }
-  };
-
-  const updateField = async (m: LiveMetric, field: string, value: unknown) => {
-    setMetrics(metrics.map((x) => x.id === m.id ? { ...x, [field]: value } : x));
-    await $updateMetric({ data: { id: m.id, [field]: value } });
-  };
-
-  const deleteRow = async (m: LiveMetric) => {
-    setMetrics(metrics.filter((x) => x.id !== m.id));
-    await $deleteMetric({ data: { id: m.id } });
-  };
-
-  // Column drag & drop
-  const handleDragStart = (idx: number) => setDragIdx(idx);
-  const handleDragOver = (e: React.DragEvent, idx: number) => {
-    e.preventDefault();
-    if (dragIdx === null || dragIdx === idx) return;
-    const reordered = [...displayPeriods];
-    const [moved] = reordered.splice(dragIdx, 1);
-    reordered.splice(idx, 0, moved);
-    setPeriodColumns(reordered);
-    setDragIdx(idx);
-  };
-  const handleDragEnd = () => setDragIdx(null);
-
-  return (
-    <div className="space-y-4">
-      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 border-b border-slate-200">
-              <tr>
-                <th className="px-3 py-2 text-left w-8"></th>
-                <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase min-w-[150px]">Metric</th>
-                <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase w-16">Unit</th>
-                <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 uppercase w-16">Target</th>
-                {displayPeriods.map((p, idx) => (
-                  <th key={p} className="px-1 py-2 text-center text-xs font-semibold text-slate-500 uppercase min-w-[70px] cursor-grab select-none group"
-                    draggable
-                    onDragStart={() => handleDragStart(idx)}
-                    onDragOver={(e) => handleDragOver(e, idx)}
-                    onDragEnd={handleDragEnd}>
-                    <div className="flex items-center justify-center gap-0.5">
-                      <span>{p}</span>
-                      <button onClick={() => deletePeriodColumn(p)} className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-400 transition-opacity ml-0.5" title="Remove column">
-                        <X className="size-3" />
-                      </button>
-                    </div>
-                  </th>
-                ))}
-                <th className="px-2 py-2 text-center text-xs font-semibold text-slate-500 uppercase w-20">Trend</th>
-                <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase w-24">Roll-up</th>
-                <th className="px-3 py-2 w-8"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {metrics.length === 0 && (
-                <tr><td colSpan={6 + displayPeriods.length} className="px-4 py-8 text-center text-slate-400 italic">No metrics added yet. Add a metric row below.</td></tr>
-              )}
-              {metrics.map((m) => {
-                const periodVals = displayPeriods.map((p) => m.periodValues[p] ?? null);
-                const filledVals = periodVals.filter((v) => v !== null) as number[];
-                const rollupVal = filledVals.length > 0
-                  ? m.rollup === "avg" ? (filledVals.reduce((a, b) => a + b, 0) / filledVals.length).toFixed(1)
-                  : m.rollup === "latest" ? String(filledVals[filledVals.length - 1])
-                  : m.rollup === "sum" ? String(filledVals.reduce((a, b) => a + b, 0))
-                  : m.rollup === "min" ? String(Math.min(...filledVals))
-                  : String(Math.max(...filledVals))
-                  : "—";
-                return (
-                  <tr key={m.id} className="border-b border-slate-100 hover:bg-slate-50/50">
-                    <td className="px-3 py-2">
-                      <button onClick={() => toggleStar(m)} className={m.starred ? "text-amber-500" : "text-slate-300 hover:text-amber-400"} title="Pin as KPI">
-                        <Star className={`size-4 ${m.starred ? "fill-amber-500" : ""}`} />
-                      </button>
-                    </td>
-                    <td className="px-3 py-2 min-w-[150px] max-w-[200px]">
-                      <input className="bg-transparent border-0 outline-none text-sm font-medium w-full whitespace-normal break-words" value={m.metricName}
-                        onChange={(e) => setMetrics(metrics.map((x) => x.id === m.id ? { ...x, metricName: e.target.value } : x))}
-                        onBlur={(e) => updateField(m, "metricName", e.target.value)} />
-                    </td>
-                    <td className="px-3 py-2">
-                      <Select value={m.unit} onValueChange={(v) => updateField(m, "unit", v)}>
-                        <SelectTrigger className="h-7 text-xs border-slate-200 w-20"><SelectValue /></SelectTrigger>
-                        <SelectContent>{METRIC_UNITS.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
-                      </Select>
-                    </td>
-                    <td className="px-3 py-2 text-center">
-                      <input type="number" className="bg-transparent border-0 outline-none text-sm w-14 text-center" value={m.target ?? ""} placeholder="—"
-                        onChange={(e) => setMetrics(metrics.map((x) => x.id === m.id ? { ...x, target: e.target.value ? Number(e.target.value) : null } : x))}
-                        onBlur={(e) => updateField(m, "target", e.target.value ? Number(e.target.value) : null)} />
-                    </td>
-                    {displayPeriods.map((p) => (
-                      <td key={p} className="px-1 py-2 text-center">
-                        <input type="number" className="bg-transparent border border-slate-200 rounded outline-none text-sm w-14 text-center py-1 focus:border-accent-indigo focus:ring-1 focus:ring-accent-indigo/20"
-                          value={m.periodValues[p] ?? ""}
-                          placeholder="—"
-                          onChange={(e) => {
-                            const newVals = { ...m.periodValues };
-                            if (e.target.value) newVals[p] = Number(e.target.value); else delete newVals[p];
-                            setMetrics(metrics.map((x) => x.id === m.id ? { ...x, periodValues: newVals } : x));
-                          }}
-                          onBlur={() => updateField(m, "periodValues", m.periodValues)} />
-                      </td>
-                    ))}
-                    <td className="px-2 py-2">
-                      <Sparkline values={periodVals} target={m.target} direction={m.direction} />
-                    </td>
-                    <td className="px-3 py-2">
-                      <div className="flex items-center gap-1">
-                        <Select value={m.rollup} onValueChange={(v) => updateField(m, "rollup", v)}>
-                          <SelectTrigger className="h-7 text-xs border-slate-200 w-20"><SelectValue /></SelectTrigger>
-                          <SelectContent>{ROLLUP_OPTIONS.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
-                        </Select>
-                        <span className={`text-xs font-bold ${m.starred ? "text-teal-600" : "text-slate-500"}`}>{rollupVal}</span>
-                      </div>
-                    </td>
-                    <td className="px-3 py-2">
-                      <button onClick={() => deleteRow(m)} className="text-slate-300 hover:text-red-500"><Trash2 className="size-4" /></button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        {/* Add metric row + add period column */}
-        <div className="px-4 py-3 border-t border-slate-100 flex items-center gap-2 flex-wrap">
-          <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="New metric name…" className="flex-1 h-9 text-sm min-w-40" onKeyDown={(e) => e.key === "Enter" && addRow()} />
-          <Button size="sm" variant="outline" onClick={addRow} className="gap-1 h-9"><Plus className="size-3" />Add metric</Button>
-          <div className="w-px h-6 bg-slate-200 mx-2" />
-          <Input value={newPeriod} onChange={(e) => setNewPeriod(e.target.value)} placeholder="e.g. Jun-26, W28, Q3" className="w-40 h-9 text-sm" onKeyDown={(e) => e.key === "Enter" && addPeriodColumn()} />
-          <Button size="sm" variant="outline" onClick={addPeriodColumn} className="gap-1 h-9"><Plus className="size-3" />Add column</Button>
-        </div>
-      </div>
-      <p className="text-xs text-slate-400">★ Star rows to pin as KPIs. Drag column headers to reorder. Hover column headers to delete. Values save on blur.</p>
-    </div>
-  );
-}
-
-// Sparkline micro-chart
-function Sparkline({ values, target, direction }: { values: (number | null)[]; target?: number | null; direction?: string }) {
-  const filled = values.filter((v) => v !== null) as number[];
-  if (filled.length < 2) return <span className="text-slate-300 text-xs">—</span>;
-  const min = Math.min(...filled);
-  const max = Math.max(...filled);
-  const range = max - min || 1;
-  const w = 64;
-  const h = 24;
-  const pad = 2;
-  const points = filled.map((v, i) => {
-    const x = pad + (i / (filled.length - 1)) * (w - pad * 2);
-    const y = h - pad - ((v - min) / range) * (h - pad * 2);
-    return `${x},${y}`;
-  }).join(" ");
-
-  // Determine color: trending in the right direction = green, wrong = red
-  const last = filled[filled.length - 1];
-  const first = filled[0];
-  const improving = direction === "down" ? last <= first : last >= first;
-  const color = improving ? "#10b981" : "#ef4444";
-
-  return (
-    <svg width={w} height={h} className="inline-block">
-      {target != null && (() => {
-        const ty = h - pad - ((target - min) / range) * (h - pad * 2);
-        const clampedY = Math.max(pad, Math.min(h - pad, ty));
-        return <line x1={pad} y1={clampedY} x2={w - pad} y2={clampedY} stroke="#94a3b8" strokeWidth="0.5" strokeDasharray="2,2" />;
-      })()}
-      <polyline points={points} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-      {/* Dot on last point */}
-      {(() => {
-        const lastX = pad + ((filled.length - 1) / (filled.length - 1)) * (w - pad * 2);
-        const lastY = h - pad - ((last - min) / range) * (h - pad * 2);
-        return <circle cx={lastX} cy={lastY} r="2.5" fill={color} />;
-      })()}
-    </svg>
   );
 }
 

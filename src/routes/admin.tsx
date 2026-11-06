@@ -1,8 +1,13 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { DollarSign, Server, Clock, Activity } from "lucide-react";
 
+// Admin now lives in Settings & Admin → Costs & Usage (shared by both sides).
+// Keep this route so old bookmarks and links still work.
 export const Route = createFileRoute("/admin")({
+  beforeLoad: () => {
+    throw redirect({ to: "/settings", search: { tab: "costs" } as any, replace: true });
+  },
   head: () => ({
     meta: [
       { title: "Admin — Horizon QX" },

@@ -133,3 +133,59 @@ export async function getDb(): Promise<pg.Pool> {
   }
   return _pool;
 }
+
+// --- One-time migrations (idempotent) ---
+let _migrated = false; // Reset on each deploy (in-memory only)
+export async function runMigrations() {
+  if (_migrated) return;
+  _migrated = true;
+  try {
+    const db = await getDb();
+    await db.query(`ALTER TABLE public.use_cases ADD COLUMN IF NOT EXISTS resolution_start_at TIMESTAMPTZ DEFAULT NULL`);
+    // Migrate Completed → Live / Closed
+    await db.query(`UPDATE public.use_cases SET stage = 'Closed' WHERE stage = 'Completed' AND LOWER(TRIM(review_cycle)) = 'one-and-done'`);
+    await db.query(`UPDATE public.use_cases SET stage = 'Live' WHERE stage = 'Completed'`);
+    // NOTE: the Oct 1 2026 bulk-stamp repair used to run here on EVERY restart (the _migrated flag is
+    // in-memory), which overwrote or cleared every real "Completed or First Live / Launched" date set
+    // after Oct 1. That repair has already been applied, so it is disabled for good.
+    const affected = 0;
+    if (affected > 0) {
+      // Step 1: Use target_end_date where available
+      const r1 = await db.query(`
+        UPDATE public.use_cases
+           SET last_completed_at = target_end_date::timestamptz
+         WHERE last_completed_at >= '2026-10-01T00:00:00Z'
+           AND stage IN ('Live', 'Closed')
+           AND target_end_date IS NOT NULL
+      `);
+      console.log('[DB] Step 1 (target_end_date):', r1.rowCount, 'rows');
+
+      // Step 2: Spread remaining Live/Closed cases across past months
+      const r2 = await db.query(`
+        UPDATE public.use_cases u
+           SET last_completed_at = sub.spread_date
+          FROM (
+            SELECT use_case_id,
+                   ('2026-09-15'::date - (ROW_NUMBER() OVER (ORDER BY use_case_id)) * INTERVAL '7 days')::timestamptz AS spread_date
+              FROM public.use_cases
+             WHERE last_completed_at >= '2026-10-01T00:00:00Z'
+               AND stage IN ('Live', 'Closed')
+          ) sub
+         WHERE u.use_case_id = sub.use_case_id
+      `);
+      console.log('[DB] Step 2 (spread):', r2.rowCount, 'rows');
+
+      // Step 3: Clear for non-Live/Closed cases
+      const r3 = await db.query(`
+        UPDATE public.use_cases
+           SET last_completed_at = NULL
+         WHERE last_completed_at >= '2026-10-01T00:00:00Z'
+           AND stage NOT IN ('Live', 'Closed')
+      `);
+      console.log('[DB] Step 3 (clear non-live):', r3.rowCount, 'rows');
+    }
+    console.log("[DB] Migrations complete");
+  } catch (e) {
+    console.error("[DB] Migration error:", e);
+  }
+}

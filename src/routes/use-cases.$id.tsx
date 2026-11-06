@@ -11,14 +11,22 @@ import { Button } from "../components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Textarea } from "../components/ui/textarea";
 import { Input } from "../components/ui/input";
-import { ChevronLeft, Pencil, Check, X, Link2, Plus, CheckSquare, Square, Trash2, Paperclip } from "lucide-react";
+import { ChevronLeft, ChevronDown, ChevronRight, Pencil, Check, X, Link2, Plus, CheckSquare, Square, Trash2, Paperclip, Unlink, CalendarDays, MessageSquare } from "lucide-react";
 import { NotesEditor } from "../components/notes-editor";
-import { $getTodos, $addTodo, $updateTodo, $deleteTodo, $saveNotes, $deleteUseCase } from "../lib/use-cases.server";
+import { $getTodos, $addTodo, $updateTodo, $deleteTodo, $saveNotes, $deleteUseCase, $getLinkedCases, $addLink, $removeLink, $postStatusUpdate } from "../lib/use-cases.server";
+import type { UseCaseLink } from "../lib/use-cases.server";
 import { useCurrentUser } from "../lib/user-context";
 import { $upsertSettingOption } from "../lib/settings.server";
+import type { LiveMetric, LiveMonitoring } from "../lib/live-mock-data";
+import { $getMonitoring, $upsertMonitoring, $getMetrics, $updateReviewCycle } from "../lib/live.server";
+import { normalizeReviewCycle } from "../lib/live-review-utils";
+import { PostDeploymentSection, MetricsTab } from "../components/post-deployment-section";
 
 export const Route = createFileRoute("/use-cases/$id")({
   component: DetailPage,
+  validateSearch: (search: Record<string, unknown>) => ({
+    tab: (search.tab as string) || undefined,
+  }),
   notFoundComponent: () => <div className="p-16 text-center"><h1 className="text-xl font-semibold">Use case not found</h1><Link to="/use-cases" className="text-accent-indigo text-sm mt-2 inline-block">Back to list</Link></div>,
 });
 
@@ -96,7 +104,7 @@ function DescEdit({ value, onSave }: { value:string; onSave:(v:string)=>void }) 
   useEffect(()=>{ setDraft(value); },[value]);
   const save = ()=>{ setEditing(false); if(draft.trim()!==value)onSave(draft.trim()); };
   if(editing) return <div><Textarea autoFocus value={draft} onChange={(e)=>setDraft(e.target.value)} onBlur={save} rows={3} className="text-sm w-full" /><button onClick={save} className="mt-1 text-xs text-accent-indigo font-medium flex items-center gap-1"><Check className="size-3" /> Save</button></div>;
-  return <p className="text-sm text-slate-600 mt-2 max-w-3xl cursor-pointer hover:text-slate-900 transition-colors group flex items-start gap-1" onClick={()=>setEditing(true)}><span>{value||<span className="italic text-slate-400">Click to add description…</span>}</span><Pencil className="size-3 mt-0.5 opacity-0 group-hover:opacity-40 shrink-0" /></p>;
+  return <p className="text-sm text-slate-600 mt-2 cursor-pointer hover:text-slate-900 transition-colors group flex items-start gap-1" onClick={()=>setEditing(true)}><span>{value||<span className="italic text-slate-400">Click to add description…</span>}</span><Pencil className="size-3 mt-0.5 opacity-0 group-hover:opacity-40 shrink-0" /></p>;
 }
 
 // ── Metrics helpers ───────────────────────────────────────────────────────────
@@ -230,11 +238,12 @@ function FilesAndLinks({ links, onUpdate }: { links:string[]; onUpdate:(links:st
   );
 }
 
-function TodoRow({ todo, onToggle, onDelete, onUpdateText, onUpdateAssignee }: { todo:TodoItem; onToggle:()=>void; onDelete:()=>void; onUpdateText:(v:string)=>void; onUpdateAssignee:(v:string)=>void }) {
+function TodoRow({ todo, onToggle, onDelete, onUpdateText, onUpdateAssignee, onUpdateDueDate }: { todo:TodoItem; onToggle:()=>void; onDelete:()=>void; onUpdateText:(v:string)=>void; onUpdateAssignee:(v:string)=>void; onUpdateDueDate:(v:string|null)=>void }) {
   const [editText, setEditText] = useState(false);
   const [editAssignee, setEditAssignee] = useState(false);
   const [tDraft, setTDraft] = useState(todo.text);
   const [aDraft, setADraft] = useState(todo.assignee);
+  const isOverdue = todo.dueDate && !todo.done && new Date(todo.dueDate + "T23:59:59") < new Date();
   useEffect(()=>{ setTDraft(todo.text); setADraft(todo.assignee); },[todo.text,todo.assignee]);
   return (
     <li className="flex items-start gap-2 group rounded-lg p-2 hover:bg-slate-50 transition-colors">
@@ -244,10 +253,17 @@ function TodoRow({ todo, onToggle, onDelete, onUpdateText, onUpdateAssignee }: {
           ? <input autoFocus value={tDraft} onChange={(e)=>setTDraft(e.target.value)} className="text-sm w-full border-b border-accent-indigo outline-none bg-transparent" onBlur={()=>{ setEditText(false); if(tDraft.trim()!==todo.text)onUpdateText(tDraft.trim()); }} onKeyDown={(e)=>{ if(e.key==="Enter"){setEditText(false);if(tDraft.trim()!==todo.text)onUpdateText(tDraft.trim());} if(e.key==="Escape"){setEditText(false);setTDraft(todo.text);} }} />
           : <p className={`text-sm cursor-pointer ${todo.done?"line-through text-slate-400":"text-slate-900"}`} onClick={()=>setEditText(true)}>{todo.text||<span className="italic text-slate-300">untitled</span>}</p>
         }
-        {editAssignee
-          ? <input autoFocus value={aDraft} onChange={(e)=>setADraft(e.target.value)} placeholder="Assigned to…" className="text-xs w-full border-b border-accent-indigo outline-none bg-transparent text-slate-500 mt-0.5" onBlur={()=>{ setEditAssignee(false); if(aDraft!==todo.assignee)onUpdateAssignee(aDraft); }} onKeyDown={(e)=>{ if(e.key==="Enter"){setEditAssignee(false);if(aDraft!==todo.assignee)onUpdateAssignee(aDraft);} if(e.key==="Escape"){setEditAssignee(false);setADraft(todo.assignee);} }} />
-          : <p className="text-xs text-slate-400 mt-0.5 cursor-pointer hover:text-accent-indigo" onClick={()=>setEditAssignee(true)}>{todo.assignee?`→ ${todo.assignee}`:<span className="italic opacity-50">unassigned</span>}</p>
-        }
+        <div className="flex items-center gap-3 mt-0.5">
+          {editAssignee
+            ? <input autoFocus value={aDraft} onChange={(e)=>setADraft(e.target.value)} placeholder="Assigned to…" className="text-xs border-b border-accent-indigo outline-none bg-transparent text-slate-500" onBlur={()=>{ setEditAssignee(false); if(aDraft!==todo.assignee)onUpdateAssignee(aDraft); }} onKeyDown={(e)=>{ if(e.key==="Enter"){setEditAssignee(false);if(aDraft!==todo.assignee)onUpdateAssignee(aDraft);} if(e.key==="Escape"){setEditAssignee(false);setADraft(todo.assignee);} }} />
+            : <p className="text-xs text-slate-400 cursor-pointer hover:text-accent-indigo" onClick={()=>setEditAssignee(true)}>{todo.assignee?`→ ${todo.assignee}`:<span className="italic opacity-50">unassigned</span>}</p>
+          }
+          <span className="text-slate-200">·</span>
+          <label className={`inline-flex items-center gap-1 text-xs cursor-pointer transition-colors ${isOverdue ? "text-red-500 font-medium" : todo.dueDate ? "text-slate-500" : "text-slate-300 hover:text-slate-400"}`}>
+            <CalendarDays className="size-3" />
+            <input type="date" value={todo.dueDate ?? ""} onChange={(e) => onUpdateDueDate(e.target.value || null)} className="bg-transparent border-0 outline-none text-xs p-0 w-24 cursor-pointer" />
+          </label>
+        </div>
       </div>
       <button onClick={onDelete} className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-status-danger transition-all mt-0.5 shrink-0"><Trash2 className="size-3.5"/></button>
     </li>
@@ -265,35 +281,72 @@ function DetailPage() {
   const deleteUseCase    = usePortfolio((s) => s.deleteUseCase);
   const deleteActivity   = usePortfolio((s) => s.deleteActivity);
   const navigate       = useNavigate();
+  const { tab: urlTab } = Route.useSearch();
   const pageSettings  = usePortfolio((s) => s.settings);
   const currentUser = useCurrentUser();
   const [comment, setComment] = useState("");
   const [todos, setTodos] = useState<TodoItem[]>([]);
   const [todosLoaded, setTodosLoaded] = useState(false);
+  const [linkedCases, setLinkedCases] = useState<UseCaseLink[]>([]);
+  const [linkSearchOpen, setLinkSearchOpen] = useState(false);
+  const [linkSearch, setLinkSearch] = useState("");
+  const [linksExpanded, setLinksExpanded] = useState(true);
+  const allUseCases = usePortfolio((s) => s.useCases);
   const [newTodoText, setNewTodoText] = useState("");
   const [newTodoAssignee, setNewTodoAssignee] = useState("");
+  const [newTodoDue, setNewTodoDue] = useState("");
+  const [monitoring, setMonitoring] = useState<LiveMonitoring | null>(null);
+  const [metrics, setMetrics] = useState<LiveMetric[]>([]);
+  const [monDesc, setMonDesc] = useState("");
+  const [monCadence, setMonCadence] = useState("Weekly");
+  const [monOwner, setMonOwner] = useState("");
+  const [monSaving, setMonSaving] = useState(false);
+  const [statusDraft, setStatusDraft] = useState("");
+  const [editingStatus, setEditingStatus] = useState(false);
+  const [statusSaving, setStatusSaving] = useState(false);
+
+  // Scroll to bottom when arriving at To-Dos tab from calendar
+  useEffect(() => {
+    if (urlTab === "todos") {
+      setTimeout(() => window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }), 500);
+    }
+  }, [urlTab]);
 
   useEffect(() => {
     $getTodos({ data: { useCaseId: id } }).then((t) => { setTodos(t); setTodosLoaded(true); });
+    $getLinkedCases({ data: { useCaseId: id } }).then(setLinkedCases).catch(console.error);
+    Promise.all([
+      $getMonitoring({ data: { useCaseId: id } }),
+      $getMetrics({ data: { useCaseId: id } }),
+    ]).then(([mon, met]) => {
+      setMonitoring(mon);
+      setMetrics(met);
+      setMonDesc(mon?.description ?? "");
+      setMonCadence(mon?.cadence ?? "Weekly");
+      setMonOwner(mon?.monitoringOwner ?? "");
+    }).catch(console.error);
   }, [id]);
 
   if (!useCase) throw notFound();
   const save = (patch: Parameters<typeof updateUseCase>[1]) => updateUseCase(useCase.id, patch);
 
-  const isDeploymentPlus = ["Deployment","Completed"].includes(useCase.stage);
+  const hasPostDeploymentHistory = !!useCase.lastCompletedAt || useCase.activity.some((a) =>
+    a.type === "stage_change" && (a.message.includes(" to Deployment") || a.message.includes(" to Live") || a.message.includes(" to Closed"))
+  );
+  const isDeploymentPlus = ["Deployment", "Live", "Closed"].includes(useCase.stage) || hasPostDeploymentHistory || monitoring !== null || metrics.length > 0 || useCase.effortAfter > 0 || useCase.proactivePct != null;
   const priorityLabel = useCase.priority === 1 ? "2026" : useCase.priority === 2 ? "2027+" : "—";
   const annualCalc = calcAnnual(useCase.timeSavedValue ?? 0, useCase.timeSavedUnit ?? "month");
 
   const handleAddTodo = async () => {
     const text = newTodoText.trim();
     if (!text) return;
-    const t = await $addTodo({ data: { useCaseId: id, text, assignee: newTodoAssignee.trim() } });
+    const t = await $addTodo({ data: { useCaseId: id, text, assignee: newTodoAssignee.trim(), dueDate: newTodoDue || undefined } });
     setTodos((prev) => [...prev, t]);
     // auto-flag in store
     if (!useCase.status || (useCase.status !== "Blocked" && useCase.status !== "Action Needed")) {
       save({ status: "Action Needed" });
     }
-    setNewTodoText(""); setNewTodoAssignee("");
+    setNewTodoText(""); setNewTodoAssignee(""); setNewTodoDue("");
   };
   const handleToggle = async (t: TodoItem) => {
     const nowDone = !t.done;
@@ -328,6 +381,25 @@ function DetailPage() {
     await $deleteTodo({ data: { id: todoId } });
   };
 
+  const saveMonitoring = async () => {
+    setMonSaving(true);
+    try {
+      const result = await $upsertMonitoring({
+        data: {
+          useCaseId: id,
+          description: monDesc,
+          tools: [],
+          cadence: monCadence,
+          monitoringOwner: monOwner,
+          approach: monitoring?.approach ?? "",
+        },
+      });
+      setMonitoring(result);
+    } finally {
+      setMonSaving(false);
+    }
+  };
+
   return (
     <div className="p-4 md:p-8 max-w-6xl mx-auto space-y-6 overflow-x-hidden">
       <button onClick={() => window.history.back()} className="text-sm text-slate-500 hover:text-slate-900 inline-flex items-center gap-1"><ChevronLeft className="size-4" /> Back</button>
@@ -343,6 +415,11 @@ function DetailPage() {
           <div className="flex flex-col items-end gap-2 shrink-0">
             <StageBadge stage={useCase.stage} />
             <FlagBadge status={useCase.status} />
+            <button
+              onClick={() => save({ closeToCompletion: !useCase.closeToCompletion })}
+              title={useCase.closeToCompletion ? "Marked as close to completion (click to remove)" : "Mark as close to completion"}
+              className={"size-7 rounded-full border-2 flex items-center justify-center text-xs font-bold transition-all " + (useCase.closeToCompletion ? "bg-teal-500 border-teal-500 text-white shadow-sm" : "border-slate-300 text-slate-300 hover:border-teal-400 hover:text-teal-400")}
+            >C</button>
           </div>
         </div>
         {/* Header facets — all editable */}
@@ -362,7 +439,87 @@ function DetailPage() {
         </div>
       </header>
 
-      <Tabs defaultValue="overview">
+      {/* ── Status Update blurb ── */}
+      <div className="border border-slate-200 rounded-lg bg-slate-50/50 px-4 py-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-2 flex-1 min-w-0">
+            <MessageSquare className="size-4 text-slate-400 mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              {editingStatus ? (
+                <div className="space-y-2">
+                  <textarea autoFocus value={statusDraft} onChange={(e) => setStatusDraft(e.target.value)} rows={2} placeholder="What's the latest on this use case?" className="w-full text-sm border border-slate-200 rounded-md px-3 py-2 bg-white focus:outline-none focus:ring-1 focus:ring-accent-indigo/40 resize-none" onKeyDown={(e) => { if (e.key === "Escape") { setEditingStatus(false); setStatusDraft(""); } }} />
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" className="h-7 text-xs bg-accent-indigo hover:bg-accent-indigo/90 text-white" disabled={!statusDraft.trim() || statusSaving} onClick={async () => {
+                      setStatusSaving(true);
+                      try {
+                        const result = await $postStatusUpdate({ data: { id: useCase.id, update: statusDraft.trim() } });
+                        if (result.ok) {
+                          save({ statusUpdate: result.statusUpdate, statusUpdateDate: result.statusUpdateDate, notes: result.notes } as any);
+                          setEditingStatus(false); setStatusDraft("");
+                        }
+                      } finally { setStatusSaving(false); }
+                    }}>{statusSaving ? "Saving…" : "Post Update"}</Button>
+                    <button className="text-xs text-slate-400 hover:text-slate-600" onClick={() => { setEditingStatus(false); setStatusDraft(""); }}>Cancel</button>
+                  </div>
+                </div>
+              ) : useCase.statusUpdate ? (
+                <div>
+                  <p className="text-sm text-slate-700">{useCase.statusUpdate}</p>
+                  <p className="text-[10px] text-slate-400 mt-1">{useCase.statusUpdateDate ? new Date(useCase.statusUpdateDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : ""}</p>
+                </div>
+              ) : (
+                <p className="text-sm text-slate-400 italic">No status update yet</p>
+              )}
+            </div>
+          </div>
+          {!editingStatus && (
+            <button onClick={() => { setStatusDraft(""); setEditingStatus(true); }} className="text-xs text-slate-400 hover:text-accent-indigo shrink-0 flex items-center gap-1 transition-colors"><Pencil className="size-3" /> {useCase.statusUpdate ? "Update" : "Add"}</button>
+          )}
+        </div>
+      </div>
+
+      {/* ── Linked Cases (Asana-style, collapsible) ── */}
+      <div className="border-b border-slate-200">
+        <div className="flex items-center justify-between py-2">
+          <button onClick={() => setLinksExpanded(!linksExpanded)} className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 uppercase tracking-wider hover:text-slate-600 transition-colors">
+            {linksExpanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+            Linked Cases{linkedCases.length > 0 ? ` (${linkedCases.length})` : ""}
+          </button>
+          <button onClick={() => { setLinkSearchOpen(true); setLinksExpanded(true); }} className="text-xs text-slate-400 hover:text-accent-indigo transition-colors flex items-center gap-1"><Plus className="size-3" /> Link</button>
+        </div>
+        {linksExpanded && (
+          <div className="pb-3">
+            {linkedCases.length === 0 && !linkSearchOpen && <p className="text-sm text-slate-300 italic pl-5">No linked cases</p>}
+            {linkedCases.map((lc) => (
+              <div key={lc.linkId} className="group flex items-center gap-3 py-1.5 pl-5 pr-1 hover:bg-slate-50 rounded transition-colors">
+                <Link2 className="size-3 text-slate-300 shrink-0" />
+                <Link to={`/use-cases/${lc.id}`} className="flex-1 min-w-0 text-sm text-slate-700 hover:text-accent-indigo transition-colors truncate">{lc.title}</Link>
+                {lc.status && <span className={"text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0 " + (lc.status === "Active" ? "bg-teal-50 text-teal-600" : lc.status === "Action Needed" ? "bg-amber-50 text-amber-600" : lc.status === "Completed" ? "bg-green-50 text-green-600" : lc.status === "Blocked" ? "bg-red-50 text-red-600" : "bg-slate-100 text-slate-500")}>{lc.status}</span>}
+                <span className="text-[10px] text-slate-400 shrink-0 hidden sm:inline">{lc.workgroup}</span>
+                <button onClick={() => { $removeLink({ data: { linkId: lc.linkId } }).then(() => setLinkedCases((p) => p.filter((x) => x.linkId !== lc.linkId))).catch(console.error); }} className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 transition-all shrink-0 p-0.5"><X className="size-3" /></button>
+              </div>
+            ))}
+            {linkSearchOpen && (
+              <div className="pl-5 pr-1 pt-1 space-y-1">
+                <Input autoFocus value={linkSearch} onChange={(e) => setLinkSearch(e.target.value)} placeholder="Search use cases…" className="h-7 text-xs border-slate-200" onKeyDown={(e) => e.key === "Escape" && (setLinkSearchOpen(false), setLinkSearch(""))} />
+                <ul className="max-h-40 overflow-y-auto">
+                  {allUseCases.filter((uc) => uc.id !== id && !linkedCases.some((lc) => lc.id === uc.id) && (uc.title.toLowerCase().includes(linkSearch.toLowerCase()) || uc.workgroup.toLowerCase().includes(linkSearch.toLowerCase()))).slice(0, 8).map((uc) => (
+                    <li key={uc.id}>
+                      <button className="w-full text-left px-2 py-1.5 rounded text-sm text-slate-600 hover:bg-teal-50 hover:text-teal-700 transition-colors flex items-center justify-between gap-2" onClick={() => { $addLink({ data: { sourceId: id, targetId: uc.id } }).then(() => $getLinkedCases({ data: { useCaseId: id } }).then(setLinkedCases)).catch(console.error); setLinkSearch(""); setLinkSearchOpen(false); }}>
+                        <span className="truncate">{uc.title}</span>
+                        <span className="text-[10px] text-slate-400 shrink-0">{uc.workgroup}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <button onClick={() => { setLinkSearchOpen(false); setLinkSearch(""); }} className="text-[10px] text-slate-400 hover:text-slate-600">Cancel</button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <Tabs defaultValue={urlTab || "overview"}>
         <TabsList className="overflow-x-auto flex-wrap">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="todos">
@@ -370,13 +527,10 @@ function DetailPage() {
           </TabsTrigger>
           <TabsTrigger value="metrics">Metrics</TabsTrigger>
           <TabsTrigger value="notes">Notes</TabsTrigger>
-          <TabsTrigger value="activity">Activity</TabsTrigger>
           <TabsTrigger value="files">
             Files & Links{useCase.links.length > 0 ? ` (${useCase.links.length})` : ""}
           </TabsTrigger>
-          <TabsTrigger value="comments">
-            Comments{useCase.comments.length > 0 ? ` (${useCase.comments.length})` : ""}
-          </TabsTrigger>
+          {isDeploymentPlus && <TabsTrigger value="post-deployment">Post-Deployment</TabsTrigger>}
         </TabsList>
 
         {/* OVERVIEW */}
@@ -390,28 +544,28 @@ function DetailPage() {
               <PortfolioPicker useCaseId={useCase.id} />
             </Panel>
             <Panel title="Timeline">
-              <div className="flex items-center justify-between py-2 border-b border-slate-50">
-                <span className="text-sm text-slate-500">Completed On</span>
+              <div className="space-y-1 py-2 border-b border-slate-50">
+                <span className="text-sm text-slate-500">Completed or First Live / Launched</span>
                 <div className="flex items-center gap-2">
                   <input
                     type="date"
                     value={useCase.lastCompletedAt ? useCase.lastCompletedAt.slice(0, 10) : ""}
                     onChange={(e) => save({ lastCompletedAt: e.target.value ? e.target.value + "T12:00:00Z" : null })}
-                    className="text-sm border border-slate-200 rounded px-2 py-1 text-slate-800 focus:outline-none focus:ring-1 focus:ring-accent-indigo/30"
+                    className="text-sm border border-slate-200 rounded px-2 py-1 text-slate-800 w-full focus:outline-none focus:ring-1 focus:ring-accent-indigo/30"
                   />
                   {useCase.lastCompletedAt && (
                     <button onClick={() => save({ lastCompletedAt: null })} className="text-xs text-slate-400 hover:text-status-danger">×</button>
                   )}
                 </div>
               </div>
-              <div className="flex items-center justify-between py-2 border-b border-slate-50">
-                <span className="text-sm text-slate-500">Target End Date</span>
+              <div className="space-y-1 py-2 border-b border-slate-50">
+                <span className="text-sm text-slate-500">Target Launch Date or Close Date</span>
                 <div className="flex items-center gap-2">
                   <input
                     type="date"
                     value={useCase.targetEndDate ? useCase.targetEndDate.slice(0, 10) : ""}
                     onChange={(e) => save({ targetEndDate: e.target.value || null })}
-                    className="text-sm border border-slate-200 rounded px-2 py-1 text-slate-800 focus:outline-none focus:ring-1 focus:ring-accent-indigo/30"
+                    className="text-sm border border-slate-200 rounded px-2 py-1 text-slate-800 w-full focus:outline-none focus:ring-1 focus:ring-accent-indigo/30"
                   />
                   {useCase.targetEndDate && (
                     <button onClick={() => save({ targetEndDate: null })} className="text-xs text-slate-400 hover:text-status-danger">×</button>
@@ -452,13 +606,14 @@ function DetailPage() {
           <Panel title={`To-Dos (${todos.length})`}>
             {!todosLoaded ? <p className="text-sm text-slate-400">Loading…</p>
               : todos.length === 0 ? <p className="text-sm text-slate-400 italic">No to-dos yet.</p>
-              : <ul className="space-y-1">{todos.map((t)=><TodoRow key={t.id} todo={t} onToggle={()=>handleToggle(t)} onDelete={()=>handleDelete(t.id)} onUpdateText={(v)=>{ setTodos((p)=>p.map((x)=>x.id===t.id?{...x,text:v}:x)); $updateTodo({data:{id:t.id,text:v}}).catch(console.error); }} onUpdateAssignee={(v)=>{ setTodos((p)=>p.map((x)=>x.id===t.id?{...x,assignee:v}:x)); $updateTodo({data:{id:t.id,assignee:v}}).catch(console.error); }} />)}</ul>
+              : <ul className="space-y-1">{[...todos].sort((a,b)=>{ if(a.dueDate&&b.dueDate) return a.dueDate.localeCompare(b.dueDate); if(a.dueDate&&!b.dueDate) return -1; if(!a.dueDate&&b.dueDate) return 1; return 0; }).map((t)=><TodoRow key={t.id} todo={t} onToggle={()=>handleToggle(t)} onDelete={()=>handleDelete(t.id)} onUpdateText={(v)=>{ setTodos((p)=>p.map((x)=>x.id===t.id?{...x,text:v}:x)); $updateTodo({data:{id:t.id,text:v}}).catch(console.error); }} onUpdateAssignee={(v)=>{ setTodos((p)=>p.map((x)=>x.id===t.id?{...x,assignee:v}:x)); $updateTodo({data:{id:t.id,assignee:v}}).catch(console.error); }} onUpdateDueDate={(v)=>{ setTodos((p)=>p.map((x)=>x.id===t.id?{...x,dueDate:v}:x)); $updateTodo({data:{id:t.id,dueDate:v}}).catch(console.error); }} />)}</ul>
             }
             <div className="border-t border-slate-100 pt-4 mt-4 space-y-2">
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Add To-Do</p>
               <Input value={newTodoText} onChange={(e)=>setNewTodoText(e.target.value)} placeholder="What needs to be done?" onKeyDown={(e)=>e.key==="Enter"&&handleAddTodo()} />
               <div className="flex gap-2">
                 <Input value={newTodoAssignee} onChange={(e)=>setNewTodoAssignee(e.target.value)} placeholder="Assign to (optional)" className="flex-1" onKeyDown={(e)=>e.key==="Enter"&&handleAddTodo()} />
+                <Input type="date" value={newTodoDue} onChange={(e)=>setNewTodoDue(e.target.value)} className="w-36" title="Due date (optional)" />
                 <Button onClick={handleAddTodo} disabled={!newTodoText.trim()} className="bg-accent-indigo hover:bg-accent-indigo/90 text-white gap-1.5"><Plus className="size-3.5" /> Add</Button>
               </div>
               <p className="text-[10px] text-slate-400">Adding a to-do auto-sets the flag to "Action Needed"</p>
@@ -511,7 +666,7 @@ function DetailPage() {
               </div>
               {isDeploymentPlus && (
                 <div>
-                  <p className="text-xs font-medium text-slate-500 mb-2">Effort After <span className="font-normal text-slate-400">(available once in Deployment)</span></p>
+                  <p className="text-xs font-medium text-slate-500 mb-2">Effort After</p>
                   <div className="flex items-center gap-2">
                     {[1,2,3,4,5].map((n)=>(
                       <button key={n} onClick={()=>save({effortAfter:n as Effort})}
@@ -528,7 +683,6 @@ function DetailPage() {
             </div>
           </Panel>
 
-          {/* Proactive (only in Deployment+) */}
           {isDeploymentPlus && (
             <Panel title="Proactive vs Reactive">
               <p className="text-xs text-slate-500 mb-3">Is this solution primarily proactive (prevents issues before they occur) or reactive (responds to issues)?</p>
@@ -548,18 +702,39 @@ function DetailPage() {
             </Panel>
           )}
           {!isDeploymentPlus && <p className="text-xs text-slate-400 italic px-1">Proactive vs Reactive will appear once this use case moves to Deployment stage.</p>}
+
+          {/* Custom metrics table (moved from post-deployment sub-tab) */}
+          {isDeploymentPlus && (
+            <div className="mt-6">
+              <MetricsTab useCaseId={id} metrics={metrics} setMetrics={setMetrics} />
+            </div>
+          )}
         </TabsContent>
 
-        {/* ACTIVITY */}
-        <TabsContent value="activity">
-          <Panel title="Activity Timeline">
-            <ol className="relative border-l border-slate-200 ml-2 space-y-6 pt-2">
-              {[...useCase.activity].reverse().map((a)=>(
-                <li key={a.id} className="pl-6 relative group"><span className="absolute -left-[7px] top-1 size-3 rounded-full bg-white border-2 border-accent-indigo" /><div className="flex items-start justify-between"><div><p className="text-xs text-slate-400 font-medium">{fmtDate(a.date)} · {fmtRel(a.date)}</p><p className="text-sm text-slate-900 mt-0.5">{a.message}</p>{a.actor&&<p className="text-[11px] text-slate-500">by {a.actor}</p>}</div><button onClick={()=>deleteActivity(useCase.id,a.id)} className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-status-danger transition-all shrink-0"><Trash2 className="size-3" /></button></div></li>
-              ))}
-            </ol>
-          </Panel>
-        </TabsContent>
+        {/* POST-DEPLOYMENT */}
+        {isDeploymentPlus && (
+          <TabsContent value="post-deployment" className="space-y-4">
+            {!["Deployment","Completed"].includes(useCase.stage) && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-sm text-blue-800">
+                This use case was previously in Deployment or Completed{useCase.lastCompletedAt ? `, most recently completed on ${fmtDate(useCase.lastCompletedAt)}` : ""}. Post-deployment data has been preserved.
+              </div>
+            )}
+            <PostDeploymentSection
+              useCaseId={id}
+              monitoring={monitoring}
+              monDesc={monDesc}
+              setMonDesc={setMonDesc}
+              reviewCycle={normalizeReviewCycle(useCase.reviewCycle)}
+              onReviewCycleChange={(v) => { save({ reviewCycle: v }); $updateReviewCycle({ data: { useCaseId: id, reviewCycle: v } }).catch(console.error); }}
+              monOwner={monOwner}
+              setMonOwner={setMonOwner}
+              monSaving={monSaving}
+              saveMonitoring={saveMonitoring}
+              metrics={metrics}
+              setMetrics={setMetrics}
+            />
+          </TabsContent>
+        )}
 
         {/* FILES & LINKS */}
         <TabsContent value="notes">
@@ -579,20 +754,7 @@ function DetailPage() {
           </Panel>
         </TabsContent>
 
-        {/* COMMENTS */}
-        <TabsContent value="comments">
-          <Panel title="Discussion">
-            <div className="space-y-4">
-              {useCase.comments.map((c)=>(
-                <div key={c.id} className="flex gap-3 group"><OwnerAvatar name={c.author} size={28} /><div className="flex-1"><div className="flex items-center gap-2"><span className="text-sm font-medium text-slate-900">{c.author}</span><span className="text-xs text-slate-400">{fmtRel(c.date)}</span><button onClick={()=>deleteComment(useCase.id,c.id)} className="opacity-0 group-hover:opacity-100 ml-auto text-slate-300 hover:text-status-danger transition-all"><Trash2 className="size-3" /></button></div><p className="text-sm text-slate-700 mt-1">{c.body}</p></div></div>
-              ))}
-              <div className="border-t border-slate-100 pt-4">
-                <Textarea placeholder="Write a comment…" value={comment} onChange={(e)=>setComment(e.target.value)} rows={3} />
-                <div className="mt-2 flex justify-end"><Button size="sm" className="bg-accent-indigo hover:bg-accent-indigo/90 text-white" onClick={()=>{ if(!comment.trim())return; addComment(useCase.id, comment.trim(), currentUser?.displayName || "Unknown"); setComment(""); }}>Post comment</Button></div>
-              </div>
-            </div>
-          </Panel>
-        </TabsContent>
+
       </Tabs>
     </div>
   );

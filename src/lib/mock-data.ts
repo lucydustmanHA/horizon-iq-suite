@@ -56,7 +56,7 @@ const STAGES = [
   "Development",
   "Testing & Validation",
   "Deployment",
-  "Completed",
+  "Live",
   "Archive",
 ] as const;
 
@@ -99,14 +99,14 @@ export function generateSeedUseCases(): UseCase[] {
       { id: `${id}-a1`, date: daysAgo(createdOffset), type: "created", message: `Use case created` },
       { id: `${id}-a2`, date: daysAgo(createdOffset - 5), type: "stage_change", message: `Moved from Submitted to Intake` },
     ];
-    if (["Development", "Testing & Validation", "Deployment", "Completed"].includes(stage)) {
+    if (["Development", "Testing & Validation", "Deployment", "Live", "Closed"].includes(stage)) {
       activity.push({ id: `${id}-a3`, date: daysAgo(createdOffset - 12), type: "stage_change", message: `Moved from Discovery to Development` });
     }
-    if (["Testing & Validation", "Deployment", "Completed"].includes(stage)) {
+    if (["Testing & Validation", "Deployment", "Live", "Closed"].includes(stage)) {
       activity.push({ id: `${id}-a4`, date: daysAgo(createdOffset - 20), type: "stage_change", message: `Moved from Development to Testing & Validation` });
     }
-    if (stage === "Completed") {
-      activity.push({ id: `${id}-a5`, date: daysAgo(createdOffset - 28), type: "stage_change", message: `Moved from Deployment to Completed` });
+    if (stage === "Live" || stage === "Closed") {
+      activity.push({ id: `${id}-a5`, date: daysAgo(createdOffset - 28), type: "stage_change", message: `Moved from Deployment to ${stage}` });
     }
     return {
       id,

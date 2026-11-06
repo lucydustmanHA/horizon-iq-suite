@@ -5,7 +5,7 @@ export type Effort = 0 | 1 | 2 | 3 | 4 | 5; // 0 = not set by user
 
 export const STAGES = [
   "Submitted","Intake","Discovery","Development",
-  "Testing & Validation","Deployment","Completed","Archive",
+  "Testing & Validation","Deployment","Live","Closed","Archive",
 ] as const;
 export type Stage = (typeof STAGES)[number];
 
@@ -43,7 +43,7 @@ export interface CommentEntry {
   resolved?: boolean; replies?: CommentEntry[];
 }
 export interface TodoItem {
-  id: string; useCaseId: string; text: string; assignee: string; done: boolean; createdDate: string;
+  id: string; useCaseId: string; text: string; assignee: string; done: boolean; createdDate: string; dueDate: string | null;
 }
 export interface UseCase {
   id: string; title: string; description: string;
@@ -58,9 +58,13 @@ export interface UseCase {
   effortBefore: Effort; effortAfter: Effort;
   proactivePct: number | null; reactivePct: number | null;
   liveNonApplicable: boolean;
+  closeToCompletion: boolean;
   devLeadTimeDays: number | null; resolutionTimeDays: number | null;
   developmentStartedAt: string | null; lastCompletedAt: string | null; targetEndDate: string | null;
   comments: CommentEntry[]; attachments: string[]; links: string[];
   notes: string;
+  statusUpdate: string;
+  statusUpdateDate: string | null;
+  reviewCycle: string;
   activity: ActivityEntry[];
 }

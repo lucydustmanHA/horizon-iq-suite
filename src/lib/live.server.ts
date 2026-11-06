@@ -6,39 +6,40 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getDb } from "./db.server";
 import type { LiveMetric, LiveMonitoring, LiveReview, LiveCaseSummary } from "./live-mock-data";
+import { compareReviewKeysDesc, inferReviewCycleFromKey, isReviewKeyInCycle, normalizeReviewCycle } from "./live-review-utils";
 
 // ---------------------------------------------------------------------------
 // Load all completed (live) use cases with summary data for dashboard
 // ---------------------------------------------------------------------------
 export const $loadLiveCases = createServerFn({ method: "GET" })
-  .validator((data: { reviewMonth: string }) => data)
+  .validator((data: { reviewKey?: string | null; reviewCycle?: string | null }) => data)
   .handler(async ({ data }): Promise<LiveCaseSummary[]> => {
-    console.log("[DB] $loadLiveCases called, month:", data.reviewMonth);
     const db = await getDb();
     const { rows: cases } = await db.query(
-      `SELECT use_case_id, title, workgroup, use_case_owner, last_completed_at, proactive_work_pct, live_non_applicable
-       FROM public.use_cases WHERE LOWER(stage) = 'completed' ORDER BY use_case_id`
+      `SELECT use_case_id, title, workgroup, use_case_owner, last_completed_at, proactive_work_pct, live_non_applicable, review_cycle, status_update, status_update_date
+       FROM public.use_cases WHERE (LOWER(stage) = 'live' OR (last_completed_at IS NOT NULL AND LOWER(stage) NOT IN ('closed','archive'))) ORDER BY use_case_id`
     );
     const ids = cases.map((r: Record<string, unknown>) => String(r.use_case_id));
-    console.log("[DB] $loadLiveCases found", ids.length, "completed cases");
     if (ids.length === 0) return [];
 
-    const ph = ids.map((_: string, i: number) => "\x24" + String(i + 1)).join(",");
-    // For reviews query: $1=reviewMonth, ids start at $2
-    const phOffset = ids.map((_: string, i: number) => "\x24" + String(i + 2)).join(",");
+    const ph = ids.map((_: string, i: number) => "$" + String(i + 1)).join(",");
 
-    // Sub-queries are resilient — failures won't block the main result
-    let reviewMap: Record<string, Record<string, unknown>> = {};
-    let metricsMap: Record<string, LiveMetric[]> = {};
-    let todoMap: Record<string, number> = {};
-    let approachMap: Record<string, string> = {};
+    const reviewRowsByUseCase: Record<string, Record<string, unknown>[]> = {};
+    const metricsMap: Record<string, LiveMetric[]> = {};
+    const todoMap: Record<string, number> = {};
+    const approachMap: Record<string, string> = {};
+    const reviewCycleMap: Record<string, string> = {};
 
     try {
       const { rows: reviews } = await db.query(
-        "SELECT use_case_id, rag_status, hours_saved, dollars_saved, comment FROM public.live_reviews WHERE review_month = $1 AND use_case_id IN (" + phOffset + ")",
-        [data.reviewMonth, ...ids]
+        "SELECT use_case_id, review_month, rag_status, meeting_notes, hours_saved, dollars_saved, comment FROM public.live_reviews WHERE use_case_id IN (" + ph + ")",
+        ids
       );
-      for (const r of reviews) reviewMap[String(r.use_case_id)] = r;
+      for (const row of reviews) {
+        const ucId = String(row.use_case_id);
+        if (!reviewRowsByUseCase[ucId]) reviewRowsByUseCase[ucId] = [];
+        reviewRowsByUseCase[ucId].push(row);
+      }
     } catch (e) { console.error("[Live] reviews query failed:", e); }
 
     try {
@@ -46,10 +47,10 @@ export const $loadLiveCases = createServerFn({ method: "GET" })
         "SELECT id, use_case_id, metric_name, unit, direction, target, period_values, rollup, starred, sort_order FROM public.live_metrics WHERE starred = true AND use_case_id IN (" + ph + ")",
         ids
       );
-      for (const r of metrics) {
-        const ucId = String(r.use_case_id);
+      for (const row of metrics) {
+        const ucId = String(row.use_case_id);
         if (!metricsMap[ucId]) metricsMap[ucId] = [];
-        metricsMap[ucId].push(rowToMetric(r));
+        metricsMap[ucId].push(rowToMetric(row));
       }
     } catch (e) { console.error("[Live] metrics query failed:", e); }
 
@@ -58,37 +59,54 @@ export const $loadLiveCases = createServerFn({ method: "GET" })
         "SELECT use_case_id, COUNT(*) as cnt FROM public.use_case_todos WHERE done = false AND use_case_id IN (" + ph + ") GROUP BY use_case_id",
         ids
       );
-      for (const r of todoCounts) todoMap[String(r.use_case_id)] = Number(r.cnt);
+      for (const row of todoCounts) todoMap[String(row.use_case_id)] = Number(row.cnt);
     } catch (e) { console.error("[Live] todos query failed:", e); }
 
     try {
       const { rows: monRows } = await db.query(
-        "SELECT use_case_id, approach FROM public.live_monitoring WHERE use_case_id IN (" + ph + ")",
+        "SELECT use_case_id, approach, cadence FROM public.live_monitoring WHERE use_case_id IN (" + ph + ")",
         ids
       );
-      for (const r of monRows) approachMap[String(r.use_case_id)] = String(r.approach);
+      for (const row of monRows) {
+        const ucId = String(row.use_case_id);
+        approachMap[ucId] = String(row.approach ?? "");
+        reviewCycleMap[ucId] = normalizeReviewCycle(String(row.cadence ?? "Monthly"));
+      }
     } catch (e) { console.error("[Live] monitoring query failed:", e); }
 
-    return cases.map((r: Record<string, unknown>) => {
-      const ucId = String(r.use_case_id);
-      const review = reviewMap[ucId];
-      return {
-        id: ucId,
-        title: String(r.title ?? ""),
-        workgroup: String(r.workgroup ?? ""),
-        owner: String(r.use_case_owner ?? ""),
-        deployedDate: r.last_completed_at ? String(r.last_completed_at) : null,
-        approach: approachMap[ucId] ?? (r.proactive_work_pct != null && Number(r.proactive_work_pct) > 0 ? "Proactive" : r.proactive_work_pct != null && Number(r.proactive_work_pct) === 0 ? "Reactive" : ""),
-        ragStatus: review ? String(review.rag_status) : "green",
-        starredMetrics: metricsMap[ucId] ?? [],
-        hoursSaved: review ? Number(review.hours_saved) : 0,
-        dollarsSaved: review ? Number(review.dollars_saved) : 0,
-        openTodos: todoMap[ucId] ?? 0,
-        comment: review ? String(review.comment) : "",
-        proactivePct: r.proactive_work_pct != null ? Number(r.proactive_work_pct) : null,
-        nonApplicable: r.live_non_applicable === true,
-      };
-    });
+    const requestedCycle = data.reviewCycle ? normalizeReviewCycle(data.reviewCycle) : null;
+
+    return cases
+      .map((row: Record<string, unknown>) => {
+        const ucId = String(row.use_case_id);
+        const assignedCycle = normalizeReviewCycle(String(row.review_cycle ?? "")) !== "Monthly" ? normalizeReviewCycle(String(row.review_cycle ?? "")) : reviewCycleMap[ucId] ?? "Monthly";
+        const review = selectReviewRow(reviewRowsByUseCase[ucId] ?? [], {
+          reviewKey: data.reviewKey ?? null,
+          reviewCycle: requestedCycle ?? assignedCycle,
+          preferSameCycle: true,
+        });
+        return {
+          id: ucId,
+          title: String(row.title ?? ""),
+          workgroup: String(row.workgroup ?? ""),
+          owner: String(row.use_case_owner ?? ""),
+          deployedDate: row.last_completed_at ? String(row.last_completed_at) : null,
+          approach: approachMap[ucId] ?? (row.proactive_work_pct != null && Number(row.proactive_work_pct) > 0 ? "Proactive" : row.proactive_work_pct != null && Number(row.proactive_work_pct) === 0 ? "Reactive" : ""),
+          reviewCycle: assignedCycle,
+          ragStatus: review ? String(review.rag_status ?? "green") : "green",
+          starredMetrics: metricsMap[ucId] ?? [],
+          hoursSaved: review ? Number(review.hours_saved ?? 0) : 0,
+          dollarsSaved: review ? Number(review.dollars_saved ?? 0) : 0,
+          openTodos: todoMap[ucId] ?? 0,
+          comment: review ? String(review.comment ?? "") : "",
+          proactivePct: row.proactive_work_pct != null ? Number(row.proactive_work_pct) : null,
+          nonApplicable: row.live_non_applicable === true,
+          latestReviewKey: review ? String(review.review_month ?? "") : null,
+          statusUpdate: String(row.status_update ?? ""),
+          statusUpdateDate: row.status_update_date ? new Date(String(row.status_update_date)).toISOString() : null,
+        };
+      })
+      .filter((row) => !requestedCycle || row.reviewCycle === requestedCycle);
   });
 
 // ---------------------------------------------------------------------------
@@ -154,7 +172,7 @@ export const $addMetric = createServerFn({ method: "POST" })
   });
 
 export const $updateMetric = createServerFn({ method: "POST" })
-  .validator((data: { id: number; metricName?: string; unit?: string; direction?: string; target?: number | null; periodValues?: Record<string, number>; rollup?: string; starred?: boolean }) => data)
+  .validator((data: { id: number; metricName?: string; unit?: string; direction?: string; target?: number | null; periodValues?: Record<string, number>; rollup?: string; starred?: boolean; description?: string }) => data)
   .handler(async ({ data }) => {
     const db = await getDb();
     const fields: string[] = [];
@@ -168,6 +186,7 @@ export const $updateMetric = createServerFn({ method: "POST" })
     if (data.periodValues !== undefined) { fields.push("period_values = " + p()); values.push(JSON.stringify(data.periodValues)); }
     if (data.rollup !== undefined) { fields.push("rollup = " + p()); values.push(data.rollup); }
     if (data.starred !== undefined) { fields.push("starred = " + p()); values.push(data.starred); }
+    if (data.description !== undefined) { fields.push("description = " + p()); values.push(data.description); }
     if (!fields.length) return { ok: true };
     values.push(data.id);
     await db.query("UPDATE public.live_metrics SET " + fields.join(", ") + " WHERE id = " + "$" + String(i), values);
@@ -186,15 +205,19 @@ export const $deleteMetric = createServerFn({ method: "POST" })
 // Reviews CRUD
 // ---------------------------------------------------------------------------
 export const $getReview = createServerFn({ method: "GET" })
-  .validator((data: { useCaseId: string; reviewMonth: string }) => data)
+  .validator((data: { useCaseId: string; reviewMonth: string; reviewCycle?: string | null }) => data)
   .handler(async ({ data }): Promise<LiveReview | null> => {
     const db = await getDb();
     const { rows } = await db.query(
-      "SELECT * FROM public.live_reviews WHERE use_case_id = $1 AND review_month = $2",
-      [data.useCaseId, data.reviewMonth]
+      "SELECT * FROM public.live_reviews WHERE use_case_id = $1",
+      [data.useCaseId]
     );
-    if (rows.length === 0) return null;
-    return rowToReview(rows[0]);
+    const row = selectReviewRow(rows, {
+      reviewKey: data.reviewMonth,
+      reviewCycle: data.reviewCycle ?? null,
+      preferSameCycle: true,
+    });
+    return row ? rowToReview(row) : null;
   });
 
 export const $upsertReview = createServerFn({ method: "POST" })
@@ -217,14 +240,19 @@ export const $upsertReview = createServerFn({ method: "POST" })
     return rowToReview(rows[0]);
   });
 
-// Get distinct review months that have data
-export const $getReviewMonths = createServerFn({ method: "GET" }).handler(async (): Promise<string[]> => {
-  const db = await getDb();
-  const { rows } = await db.query(
-    "SELECT DISTINCT review_month FROM public.live_reviews ORDER BY review_month DESC"
-  );
-  return rows.map((r: Record<string, unknown>) => String(r.review_month));
-});
+// Get distinct review keys that have data
+export const $getReviewMonths = createServerFn({ method: "GET" })
+  .validator((data?: { reviewCycle?: string | null }) => data ?? {})
+  .handler(async ({ data }): Promise<string[]> => {
+    const db = await getDb();
+    const { rows } = await db.query(
+      "SELECT DISTINCT review_month FROM public.live_reviews"
+    );
+    const keys = rows.map((row: Record<string, unknown>) => String(row.review_month));
+    const requestedCycle = data?.reviewCycle ? normalizeReviewCycle(data.reviewCycle) : null;
+    const filtered = requestedCycle ? keys.filter((key) => isReviewKeyInCycle(key, requestedCycle)) : keys;
+    return filtered.sort(compareReviewKeysDesc);
+  });
 
 // ---------------------------------------------------------------------------
 // Row mappers
@@ -241,6 +269,7 @@ function rowToMetric(r: Record<string, unknown>): LiveMetric {
     rollup: String(r.rollup ?? "avg"),
     starred: Boolean(r.starred),
     sortOrder: Number(r.sort_order ?? 0),
+    description: String(r.description ?? ""),
   };
 }
 
@@ -271,6 +300,28 @@ function rowToReview(r: Record<string, unknown>): LiveReview {
   };
 }
 
+function selectReviewRow(
+  rows: Record<string, unknown>[],
+  options: { reviewKey?: string | null; reviewCycle?: string | null; preferSameCycle?: boolean },
+): Record<string, unknown> | null {
+  if (!rows.length) return null;
+
+  const requestedCycle = options.reviewCycle ? normalizeReviewCycle(options.reviewCycle) : null;
+
+  if (options.reviewKey) {
+    const exact = rows.find((row) => String(row.review_month) === options.reviewKey);
+    if (exact) return exact;
+  }
+
+  let relevant = rows;
+  if (requestedCycle && options.preferSameCycle) {
+    const sameCycle = rows.filter((row) => inferReviewCycleFromKey(String(row.review_month)) === requestedCycle);
+    if (sameCycle.length) relevant = sameCycle;
+  }
+
+  relevant.sort((a, b) => compareReviewKeysDesc(String(a.review_month), String(b.review_month)));
+  return relevant[0] ?? null;
+}
 
 export const $toggleNonApplicable = createServerFn({ method: "POST" })
   .validator((data: { useCaseId: string; nonApplicable: boolean }) => data)
@@ -280,4 +331,68 @@ export const $toggleNonApplicable = createServerFn({ method: "POST" })
       "UPDATE public.use_cases SET live_non_applicable = $1 WHERE use_case_id = $2",
       [data.nonApplicable, data.useCaseId]
     );
+  });
+
+// ---------------------------------------------------------------------------
+// Review cycle assignment
+// ---------------------------------------------------------------------------
+export const $updateReviewCycle = createServerFn({ method: "POST" })
+  .validator((data: { useCaseId: string; reviewCycle: string }) => data)
+  .handler(async ({ data }) => {
+    const db = await getDb();
+    const cycle = normalizeReviewCycle(data.reviewCycle);
+    await db.query(
+      "UPDATE public.use_cases SET review_cycle = $1 WHERE use_case_id = $2",
+      [cycle, data.useCaseId]
+    );
+    // Also sync to live_monitoring.cadence if row exists
+    await db.query(
+      "UPDATE public.live_monitoring SET cadence = $1, updated_at = NOW() WHERE use_case_id = $2",
+      [cycle, data.useCaseId]
+    );
+    return { ok: true };
+  });
+
+// ---------------------------------------------------------------------------
+// Inline RAG update from dashboard
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Review sessions (for Past Reviews on dashboard)
+// ---------------------------------------------------------------------------
+export const $getReviewSessions = createServerFn({ method: "GET" })
+  .handler(async (): Promise<{ reviewKey: string; cycle: string; completedAt: string; caseCount: number }[]> => {
+    const db = await getDb();
+    const { rows } = await db.query(
+      `SELECT review_month, MAX(updated_at) as completed_at, COUNT(DISTINCT use_case_id) as case_count
+       FROM public.live_reviews GROUP BY review_month ORDER BY MAX(updated_at) DESC`
+    );
+    return rows.map((r: Record<string, unknown>) => ({
+      reviewKey: String(r.review_month),
+      cycle: inferReviewCycleFromKey(String(r.review_month)),
+      completedAt: r.completed_at ? new Date(r.completed_at as string).toISOString() : "",
+      caseCount: Number(r.case_count),
+    }));
+  });
+
+export const $deleteReviewSession = createServerFn({ method: "POST" })
+  .validator((data: { reviewKey: string }) => data)
+  .handler(async ({ data }) => {
+    const db = await getDb();
+    await db.query("DELETE FROM public.live_reviews WHERE review_month = $1", [data.reviewKey]);
+    return { ok: true };
+  });
+
+export const $updateRagFromDashboard = createServerFn({ method: "POST" })
+  .validator((data: { useCaseId: string; ragStatus: string; reviewKey: string }) => data)
+  .handler(async ({ data }): Promise<LiveReview> => {
+    const db = await getDb();
+    const { rows } = await db.query(
+      `INSERT INTO public.live_reviews (use_case_id, review_month, rag_status, meeting_notes, hours_saved, dollars_saved, comment, updated_at)
+       VALUES ($1, $2, $3, '', 0, 0, '', NOW())
+       ON CONFLICT (use_case_id, review_month) DO UPDATE SET
+         rag_status = EXCLUDED.rag_status, updated_at = NOW()
+       RETURNING *`,
+      [data.useCaseId, data.reviewKey, data.ragStatus]
+    );
+    return rowToReview(rows[0]);
   });

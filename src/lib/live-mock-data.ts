@@ -14,14 +14,17 @@ export interface LiveMetric {
   rollup: string; // avg, latest, sum, min, max
   starred: boolean;
   sortOrder: number;
+  description: string;
 }
+
+import { REVIEW_CYCLE_OPTIONS } from "./live-review-utils";
 
 export interface LiveMonitoring {
   id: number;
   useCaseId: string;
   description: string;
   tools: string[];
-  cadence: string; // Daily, Weekly, Bi-weekly, Monthly, Quarterly
+  cadence: string; // Review cycle assignment
   monitoringOwner: string;
   approach: string; // Proactive, Reactive
   updatedAt: string;
@@ -30,7 +33,7 @@ export interface LiveMonitoring {
 export interface LiveReview {
   id: number;
   useCaseId: string;
-  reviewMonth: string; // YYYY-MM format
+  reviewMonth: string; // Generic review key (legacy name retained for DB compatibility)
   ragStatus: string; // green, orange, red
   meetingNotes: string;
   hoursSaved: number;
@@ -46,7 +49,8 @@ export interface LiveCaseSummary {
   owner: string;
   deployedDate: string | null; // last_completed_at
   approach: string; // from live_monitoring or default
-  ragStatus: string; // from live_reviews for current month
+  reviewCycle: string; // assigned review cycle
+  ragStatus: string; // from latest matching live review
   starredMetrics: LiveMetric[];
   hoursSaved: number;
   dollarsSaved: number;
@@ -54,9 +58,12 @@ export interface LiveCaseSummary {
   comment: string; // from live_reviews
   proactivePct: number | null;
   nonApplicable: boolean;
+  latestReviewKey: string | null;
+  statusUpdate: string;
+  statusUpdateDate: string | null;
 }
 
 export const METRIC_UNITS = ["%", "#", "hrs", "$", "ms"] as const;
 export const ROLLUP_OPTIONS = ["avg", "latest", "sum", "min", "max"] as const;
-export const CADENCE_OPTIONS = ["Daily", "Weekly", "Bi-weekly", "Monthly", "Quarterly"] as const;
+export const CADENCE_OPTIONS = REVIEW_CYCLE_OPTIONS;
 export const RAG_OPTIONS = ["green", "orange", "red"] as const;

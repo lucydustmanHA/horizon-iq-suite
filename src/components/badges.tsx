@@ -8,7 +8,8 @@ const STAGE_STYLES: Record<Stage, string> = {
   Development:           "bg-indigo-50 text-indigo-700 ring-indigo-200",
   "Testing & Validation":"bg-amber-50 text-amber-700 ring-amber-200",
   Deployment:            "bg-teal-50 text-teal-700 ring-teal-200",
-  Completed:             "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  Live:                  "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  Closed:                "bg-slate-50 text-slate-600 ring-slate-300",
   Archive:               "bg-zinc-100 text-zinc-500 ring-zinc-200",
 };
 

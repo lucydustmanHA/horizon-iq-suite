@@ -16,6 +16,10 @@ interface PortfolioState {
   searchQuery: string;
   celebrate: boolean;
   setCelebrate: (v: boolean) => void;
+  darkMode: boolean;
+  setDarkMode: (v: boolean) => void;
+  appName: string;
+  setAppName: (v: string) => void;
   setUseCases: (ucs: UseCase[]) => void;
   addUseCase: (uc: UseCase) => void;
   setSearchQuery: (q: string) => void;
@@ -45,7 +49,12 @@ export const usePortfolio = create<PortfolioState>()(
       initialized: false,
       settings: {},
       settingsLoaded: false,
-      setSettings: (s) => set({ settings: s, settingsLoaded: true }),
+      setSettings: (s) => {
+        const patch: Partial<PortfolioState> & { settings: Record<string, string[]>; settingsLoaded: boolean } = { settings: s, settingsLoaded: true };
+        const serverAppName = s['app_name']?.[0];
+        if (serverAppName) (patch as any).appName = serverAppName;
+        set(patch);
+      },
       addSettingOption: (key, value) => {
         set((st) => { const cur = st.settings[key] ?? []; if (cur.includes(value)) return st; return { settings: { ...st.settings, [key]: [...cur, value] } }; });
       },
@@ -55,6 +64,15 @@ export const usePortfolio = create<PortfolioState>()(
       searchQuery: "",
     celebrate: false,
     setCelebrate: (v) => set({ celebrate: v }),
+      darkMode: false,
+      appName: "Horizon QX",
+      setAppName: (v) => set({ appName: v }),
+      setDarkMode: (v) => {
+        set({ darkMode: v });
+        if (typeof document !== "undefined") {
+          document.documentElement.classList.toggle("dark", v);
+        }
+      },
       setUseCases: (ucs) => set({ useCases: ucs, initialized: true, loadedAt: Date.now() }),
       addUseCase: (uc) => set((s) => ({ useCases: [uc, ...s.useCases] })),
       setSearchQuery: (q) => set({ searchQuery: q }),
@@ -68,17 +86,24 @@ export const usePortfolio = create<PortfolioState>()(
             if (to === "Development" && !uc.developmentStartedAt) {
               next.developmentStartedAt = new Date().toISOString();
             }
-            // Auto-calculate dev lead time when reaching Completed
-            if (to === "Completed" && next.developmentStartedAt && !uc.devLeadTimeDays) {
+            // Auto-calculate dev lead time when reaching Live or Closed
+            if ((to === "Live" || to === "Closed") && next.developmentStartedAt && !uc.devLeadTimeDays) {
               const start = new Date(next.developmentStartedAt).getTime();
               const days = Math.round((Date.now() - start) / 86_400_000);
               next.devLeadTimeDays = days;
+            }
+            // Leaving Live clears the date (mirrors $moveStage on the server) so the next go-live re-stamps it
+            if (uc.stage === "Live" && to !== "Live" && to !== "Closed") {
+              next.lastCompletedAt = null;
+            }
+            // Only stamp completion date if not already set (preserve original date)
+            if ((to === "Live" || to === "Closed") && !next.lastCompletedAt) {
               next.lastCompletedAt = new Date().toISOString();
             }
             return next;
           }),
         }));
-        if (to === "Completed") set({ celebrate: true });
+        if (to === "Live" || to === "Closed") set({ celebrate: true });
         $moveStage({ data: { id, from, to } }).catch((err) => console.error("[DB] moveStage failed:", err));
       },
       updateUseCase: (id, patch) => {
@@ -89,8 +114,27 @@ export const usePortfolio = create<PortfolioState>()(
             const entries: Array<Omit<ActivityEntry, "id" | "date">> = [];
             if (patch.status && patch.status !== uc.status)
               entries.push({ type: "status_change", message: `Status: ${uc.status} → ${patch.status}`, actor: "You" });
-            if (patch.stage && patch.stage !== uc.stage)
+            if (patch.stage && patch.stage !== uc.stage) {
               entries.push({ type: "stage_change", message: `Moved from ${uc.stage} to ${patch.stage}`, actor: "You" });
+              // Auto-set development start when entering Development
+              if (patch.stage === "Development" && !uc.developmentStartedAt) {
+                next.developmentStartedAt = new Date().toISOString();
+                patch.developmentStartedAt = next.developmentStartedAt;
+              }
+              // Auto-set completed date + dev lead time when reaching Live or Closed
+              if (patch.stage === "Live" || patch.stage === "Closed") {
+                // Only stamp completion date if not already set (preserve original date)
+                if (!next.lastCompletedAt) {
+                  next.lastCompletedAt = new Date().toISOString();
+                  patch.lastCompletedAt = next.lastCompletedAt;
+                }
+                if (next.developmentStartedAt && !uc.devLeadTimeDays) {
+                  const days = Math.round((Date.now() - new Date(next.developmentStartedAt).getTime()) / 86_400_000);
+                  next.devLeadTimeDays = days;
+                  patch.devLeadTimeDays = days;
+                }
+              }
+            }
             if (patch.priority !== undefined && patch.priority !== uc.priority)
               entries.push({ type: "priority_change", message: `Priority changed`, actor: "You" });
             if (patch.useCaseOwner && patch.useCaseOwner !== uc.useCaseOwner)
@@ -100,7 +144,7 @@ export const usePortfolio = create<PortfolioState>()(
             return next;
           }),
         }));
-        if (patch.stage === "Completed") set({ celebrate: true });
+        if (patch.stage === "Live" || patch.stage === "Closed") set({ celebrate: true });
         $updateUseCase({ data: { id, patch } }).catch((err) => console.error("[DB] updateUseCase failed:", err));
       },
       addComment: (id, body, author = "Unknown") => {
@@ -136,7 +180,7 @@ export const usePortfolio = create<PortfolioState>()(
       },
       resetSeed: () => set({ useCases: [], loadedAt: Date.now() }),
     }),
-    { name: "horizon-qx-portfolio-v7", partialize: (s) => ({ useCases: s.useCases, loadedAt: s.loadedAt, initialized: s.initialized }) },
+    { name: "horizon-qx-portfolio-v7", partialize: (s) => ({ useCases: s.useCases, loadedAt: s.loadedAt, initialized: s.initialized, darkMode: s.darkMode, appName: s.appName }) },
   ),
 );
 

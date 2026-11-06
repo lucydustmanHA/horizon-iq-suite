@@ -52,7 +52,7 @@ export function CelebrationOverlay() {
       {/* Center message */}
       <div className="absolute inset-0 flex items-center justify-center animate-bounce-in">
         <div className="bg-white/95 backdrop-blur-sm px-8 py-4 rounded-2xl shadow-2xl border border-emerald-200">
-          <p className="text-2xl font-bold text-emerald-600 text-center">🎉 Completed!</p>
+          <p className="text-2xl font-bold text-emerald-600 text-center">🎉 We're Live!</p>
           <p className="text-sm text-slate-500 text-center mt-1">Another one delivered.</p>
         </div>
       </div>

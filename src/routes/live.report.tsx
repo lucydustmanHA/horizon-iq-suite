@@ -1,67 +1,79 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
+import { ChevronLeft } from "lucide-react";
 import { Button } from "../components/ui/button";
-import { $loadLiveCases, $getMetrics, $getMonitoring } from "../lib/live.server";
+import { $loadLiveCases, $getMetrics, $getMonitoring, $getReview } from "../lib/live.server";
 import { $getTodos } from "../lib/use-cases.server";
 import type { LiveCaseSummary, LiveMetric } from "../lib/live-mock-data";
+import { formatReviewKey, getCurrentReviewKey, normalizeReviewCycle, getMetricRollupValue, formatMetricValue, sortMetricPeriods } from "../lib/live-review-utils";
 
 export const Route = createFileRoute("/live/report")({
   component: ReportPage,
   validateSearch: (search: Record<string, unknown>) => ({
-    month: (search.month as string) || getCurrentMonth(),
+    cycle: (search.cycle as string) || "Monthly",
+    reviewKey: (search.reviewKey as string) || "",
   }),
 });
 
-function getCurrentMonth() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
-function formatMonth(ym: string) {
-  const [y, m] = ym.split("-");
-  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-  return `${months[Number(m) - 1]} ${y}`;
-}
-
-interface CaseDetail { case_: LiveCaseSummary; metrics: LiveMetric[]; monDesc: string; monCadence: string; monOwner: string; todos: {id: string; text: string; done: boolean; assignee: string}[]; }
+interface CaseDetail { case_: LiveCaseSummary; metrics: LiveMetric[]; monDesc: string; monCadence: string; monOwner: string; meetingNotes: string; todos: {id: string; text: string; done: boolean; assignee: string}[]; }
 
 function ReportPage() {
-  const { month } = Route.useSearch();
+  const { cycle, reviewKey: reviewKeyParam } = Route.useSearch();
+  const reviewKey = reviewKeyParam || getCurrentReviewKey(cycle);
+  const normalizedCycle = normalizeReviewCycle(cycle);
   const [cases, setCases] = useState<LiveCaseSummary[]>([]);
   const [details, setDetails] = useState<CaseDetail[]>([]);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    $loadLiveCases({ data: { reviewMonth: month } }).then(async (allCases) => {
+    $loadLiveCases({ data: { reviewCycle: normalizedCycle, reviewKey } }).then(async (allCases) => {
       const c = allCases.filter((x) => !x.nonApplicable);
       setCases(c);
       const dets: CaseDetail[] = [];
       for (const cs of c) {
-        const [metrics, mon, todos] = await Promise.all([
+        const [metrics, mon, todos, rev] = await Promise.all([
           $getMetrics({ data: { useCaseId: cs.id } }),
           $getMonitoring({ data: { useCaseId: cs.id } }),
           $getTodos({ data: { useCaseId: cs.id } }),
+          $getReview({ data: { useCaseId: cs.id, reviewMonth: reviewKey, reviewCycle: normalizedCycle } }),
         ]);
-        dets.push({ case_: cs, metrics, monDesc: mon?.description ?? "", monCadence: mon?.cadence ?? "", monOwner: mon?.monitoringOwner ?? "", todos: todos.filter((t: any) => !t.done) });
+        dets.push({ case_: cs, metrics, monDesc: mon?.description ?? "", monCadence: mon?.cadence ?? "", monOwner: mon?.monitoringOwner ?? "", meetingNotes: rev?.meetingNotes ?? "", todos: todos.filter((t: any) => !t.done) });
       }
       setDetails(dets);
       setLoaded(true);
     }).catch(() => setLoaded(true));
-  }, [month]);
+  }, [normalizedCycle, reviewKey]);
 
   const greenCount = cases.filter((c) => c.ragStatus === "green").length;
   const orangeCount = cases.filter((c) => c.ragStatus === "orange").length;
   const redCount = cases.filter((c) => c.ragStatus === "red").length;
   const proactiveCount = cases.filter((c) => c.proactivePct !== null && c.proactivePct > 0).length;
-  const instrumentedCount = cases.filter((c) => c.proactivePct !== null).length;
-  const pctProactive = instrumentedCount > 0 ? Math.round((proactiveCount / instrumentedCount) * 100) : 0;
+  const pctProactive = cases.length > 0 ? Math.round((proactiveCount / cases.length) * 100) : 0;
   const openItems = details.reduce((s, d) => s + d.todos.length, 0);
 
   return (
     <div className="bg-white min-h-screen">
+      {/* Print styles for list formatting */}
+      <style dangerouslySetInnerHTML={{ __html: `
+        @media print {
+          ul { list-style-type: disc !important; padding-left: 1.5rem !important; }
+          ol { list-style-type: decimal !important; padding-left: 1.5rem !important; }
+          ul ul { list-style-type: circle !important; }
+          ul ul ul { list-style-type: square !important; }
+          li { display: list-item !important; }
+        }
+        .report-html-content ul { list-style-type: disc; padding-left: 1.5rem; }
+        .report-html-content ol { list-style-type: decimal; padding-left: 1.5rem; }
+        .report-html-content ul ul { list-style-type: circle; }
+        .report-html-content li { display: list-item; }
+      ` }} />
       {/* Print header bar */}
-      <div className="print:hidden sticky top-0 bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between z-10">
-        <span className="text-sm text-slate-600 font-medium">Monthly Review Report · {formatMonth(month)}</span>
-        <Button onClick={() => window.print()} className="bg-slate-800 hover:bg-slate-900 text-white text-sm">Print / Save as PDF</Button>
+      <div className="print:hidden sticky top-0 bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between gap-4 z-10">
+        <div className="flex items-center gap-4 min-w-0">
+          <Link to="/live" className="text-sm text-slate-500 hover:text-slate-900 inline-flex items-center gap-1 shrink-0"><ChevronLeft className="size-4" /> Live & Delivering</Link>
+          <span className="text-sm text-slate-600 font-medium truncate">{normalizedCycle} Review Report · {formatReviewKey(reviewKey)}</span>
+        </div>
+        <Button onClick={() => window.print()} className="bg-slate-800 hover:bg-slate-900 text-white text-sm shrink-0">Print / Save as PDF</Button>
       </div>
 
       {!loaded ? <p className="text-center py-20 text-slate-400">Loading report…</p> : (
@@ -69,8 +81,8 @@ function ReportPage() {
           {/* Title */}
           <div>
             <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Horizon QX · AI Portfolio</p>
-            <h1 className="text-3xl font-bold mt-1">Monthly Review</h1>
-            <p className="text-lg text-slate-500 mt-1">{formatMonth(month)} · Live & Delivering</p>
+            <h1 className="text-3xl font-bold mt-1">{normalizedCycle} Review</h1>
+            <p className="text-lg text-slate-500 mt-1">{formatReviewKey(reviewKey)} · Live & Delivering</p>
           </div>
 
           {/* Summary cards */}
@@ -113,9 +125,9 @@ function ReportPage() {
           </div>
 
           {/* Per-case details */}
-          {details.map(({ case_: c, metrics, monDesc, monCadence, monOwner, todos }) => {
+          {details.map(({ case_: c, metrics, monDesc, monCadence, monOwner, meetingNotes, todos }) => {
             const starredMetrics = metrics.filter((m) => m.starred);
-            const allPeriods = Array.from(new Set(metrics.flatMap((m) => Object.keys(m.periodValues)))).sort().slice(-6);
+            const allPeriods = sortMetricPeriods(Array.from(new Set(metrics.flatMap((m) => Object.keys(m.periodValues))))).slice(-6);
             const approachLabel = c.proactivePct !== null && c.proactivePct > 0 ? "Proactive" : c.proactivePct === 0 ? "Reactive" : "";
             return (
               <div key={c.id} className="break-inside-avoid border-t border-slate-200 pt-8 space-y-6">
@@ -133,7 +145,7 @@ function ReportPage() {
                 {monDesc && (
                   <div className="border border-slate-200 rounded-xl p-5">
                     <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-2">Post-Deployment Monitoring Process</p>
-                    <div className="text-sm text-slate-700" dangerouslySetInnerHTML={{ __html: monDesc }} />
+                    <div className="text-sm text-slate-700 report-html-content" dangerouslySetInnerHTML={{ __html: monDesc }} />
                     <p className="text-xs text-slate-400 mt-3">Cadence: {monCadence} · Owner: {monOwner}</p>
                   </div>
                 )}
@@ -142,17 +154,12 @@ function ReportPage() {
                 {starredMetrics.length > 0 && (
                   <div className="flex gap-4">
                     {starredMetrics.map((m) => {
-                      const vals = Object.values(m.periodValues);
-                      const rv = vals.length > 0
-                        ? m.rollup === "avg" ? (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1)
-                        : m.rollup === "latest" ? String(vals[vals.length - 1])
-                        : String(vals.reduce((a, b) => a + b, 0))
-                        : "\u2014";
+                      const rv = getMetricRollupValue(m);
                       return (
                         <div key={m.id} className="border border-slate-200 rounded-xl p-4 min-w-[120px]">
                           <p className="text-[10px] font-semibold text-slate-400 uppercase">{m.metricName}</p>
-                          <p className="text-2xl font-bold text-teal-600">{rv}{m.unit === "%" ? "%" : ""}</p>
-                          {m.target !== null && <p className="text-xs text-slate-400">{m.rollup} · target ≥ {m.target}{m.unit === "%" ? "%" : ""}</p>}
+                          <p className="text-2xl font-bold text-teal-600">{formatMetricValue(rv, m.unit)}</p>
+                          {m.target !== null && <p className="text-xs text-slate-400">{m.rollup} · target {m.direction === "down" ? "≤" : "≥"} {m.target}{m.unit === "%" ? "%" : ""}</p>}
                         </div>
                       );
                     })}
@@ -173,17 +180,12 @@ function ReportPage() {
                       </thead>
                       <tbody>
                         {metrics.map((m) => {
-                          const vals = Object.values(m.periodValues);
-                          const rv = vals.length > 0
-                            ? m.rollup === "avg" ? (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1)
-                            : m.rollup === "latest" ? String(vals[vals.length - 1])
-                            : String(vals.reduce((a, b) => a + b, 0))
-                            : "\u2014";
+                           const rv = getMetricRollupValue(m);
                           return (
                             <tr key={m.id} className="border-b border-slate-100">
                               <td className="px-4 py-2"><span className="font-medium">{m.metricName}</span><br/><span className="text-xs text-slate-400">{m.unit} · {m.direction === "down" ? "lower-better" : "higher-better"}</span></td>
                               {allPeriods.map((p) => <td key={p} className="px-2 py-2 text-center">{m.periodValues[p] ?? ""}</td>)}
-                              <td className="px-3 py-2 text-right font-bold">{rv}{m.unit === "%" ? "%" : ""}</td>
+                              <td className="px-3 py-2 text-right font-bold">{formatMetricValue(rv, m.unit)}</td>
                             </tr>
                           );
                         })}
@@ -209,6 +211,14 @@ function ReportPage() {
                       </div>
                     )}
                     {c.comment && <p className="text-sm"><span className="font-semibold">Health note:</span> <span className="text-slate-600">{c.comment}</span></p>}
+                  </div>
+                )}
+
+                {/* Meeting Notes */}
+                {meetingNotes && (
+                  <div className="border border-slate-200 rounded-xl p-5">
+                    <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-2">Meeting Notes</p>
+                    <div className="text-sm text-slate-700 report-html-content" dangerouslySetInnerHTML={{ __html: meetingNotes }} />
                   </div>
                 )}
               </div>

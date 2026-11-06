@@ -4,10 +4,12 @@ import {
   Link,
   createRootRouteWithContext,
   useRouter,
+  useRouterState,
+  useNavigate,
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
@@ -17,6 +19,8 @@ import { usePortfolio } from "../lib/store";
 import { $loadUseCases, $reportError } from "../lib/use-cases.server";
 import { UserProvider } from "../lib/user-context";
 import { AIChat } from "../components/ai-chat";
+import { StrategyShell } from "../components/strategy-shell";
+import { getSavedSide, saveSide, sideForPath, isSharedPath } from "../lib/app-side";
 
 function NotFoundComponent() {
   return (
@@ -84,14 +88,14 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Horizon QX — AI & Innovation Portal" },
+      { title: "Horizon QX — Business Transformation" },
       {
         name: "description",
         content:
           "Manage AI, automation, and innovation use cases through their lifecycle — a modern portal built for portfolio, pipeline, and executive reporting.",
       },
       { name: "author", content: "Horizon QX" },
-      { property: "og:title", content: "Horizon QX — AI & Innovation Portal" },
+      { property: "og:title", content: "Horizon QX — Business Transformation" },
       {
         property: "og:description",
         content:
@@ -137,13 +141,64 @@ function RootShell({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * Picks the shell for the current route.
+ * - /welcome        → no shell (first-visit chooser)
+ * - /strategy/*     → StrategyShell
+ * - /settings,/admin → shell of the side the user came from
+ * - everything else → the original AppShell + AI chat, unchanged
+ * First visit (no saved side) landing on "/" goes to /welcome once.
+ */
+function SideLayout() {
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const navigate = useNavigate();
+  const firstRun = useRef(true);
+  const saved = getSavedSide();
+  const side = sideForPath(pathname, saved ?? "ai");
+  const needsChooser = !saved && pathname === "/";
+
+  useEffect(() => {
+    const isFirst = firstRun.current;
+    firstRun.current = false;
+    if (pathname === "/welcome") return;
+    if (needsChooser) { navigate({ to: "/welcome" as any, replace: true }); return; }
+    // Returning user who last worked in Strategy and opened the app root → back to Strategy.
+    if (isFirst && pathname === "/" && saved === "strategy") { navigate({ to: "/strategy" as any, replace: true }); return; }
+    if (!isSharedPath(pathname)) saveSide(side);
+  }, [pathname]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (needsChooser || (firstRun.current && pathname === "/" && saved === "strategy")) return null;
+  if (pathname === "/welcome") return <Outlet />;
+  if (side === "strategy") return <StrategyShell><Outlet /></StrategyShell>;
+  return (
+    <>
+      <AppShell>
+        <Outlet />
+      </AppShell>
+      <AIChat />
+    </>
+  );
+}
+
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const [mounted, setMounted] = useState(false);
   const initialized = usePortfolio((s) => s.initialized);
   const setUseCases = usePortfolio((s) => s.setUseCases);
 
-  useEffect(() => { setMounted(true); }, []);
+  useEffect(() => {
+    setMounted(true);
+    // Restore dark mode from persisted Zustand state
+    const raw = localStorage.getItem("horizon-qx-portfolio-v7");
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed?.state?.darkMode) {
+          document.documentElement.classList.add("dark");
+        }
+      } catch {}
+    }
+  }, []);
 
   useEffect(() => {
     if (!mounted) return;
@@ -188,11 +243,8 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <UserProvider>
-        <AppShell>
-          <Outlet />
-        </AppShell>
+        <SideLayout />
         <Toaster />
-        <AIChat />
       </UserProvider>
     </QueryClientProvider>
   );
