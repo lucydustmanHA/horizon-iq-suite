@@ -15,7 +15,7 @@ const ADMINS = (process.env.TEAMS_ADMIN_EMAILS ?? "lucy.dustman@horizonair.com")
   .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
 
 /** Signed-in user's email from the Databricks Apps forwarded headers (same approach as strategy.server.ts). */
-async function currentEmail(): Promise<string> {
+export async function currentEmail(): Promise<string> {
   const names = ["x-forwarded-email", "x-forwarded-preferred-username", "x-forwarded-user"];
   // 1) TanStack Start's request API
   try {
@@ -36,7 +36,11 @@ async function currentEmail(): Promise<string> {
   return "";
 }
 
-async function requireAdmin(): Promise<string> {
+export function isTeamsAdmin(email: string): boolean {
+  return !!email && ADMINS.includes(email.toLowerCase());
+}
+
+export async function requireAdmin(): Promise<string> {
   const email = (await currentEmail()).toLowerCase();
   if (!email || !ADMINS.includes(email)) throw new Error("Only Teams admins can do this.");
   return email;
@@ -63,7 +67,7 @@ function validWebhookUrl(raw: string): string {
 export async function sendTeamsMessage(email: string, html: string): Promise<{ ok: boolean; status: number; detail: string }> {
   const url = await readWebhookUrl();
   if (!url) throw new Error("The Teams webhook URL hasn't been set yet (Settings → Strategy).");
-  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, message: html }) });
+  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, message: html }), signal: AbortSignal.timeout(20000) });
   const detail = res.ok ? "" : (await res.text().catch(() => "")).slice(0, 300);
   return { ok: res.ok, status: res.status, detail };
 }

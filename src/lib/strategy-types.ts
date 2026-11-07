@@ -76,6 +76,24 @@ export function initiativesForSlide(initiatives: StrategyInitiative[], key: stri
   return [...list].sort((a, b) => (INIT_STATUS_RANK[a.status] ?? 9) - (INIT_STATUS_RANK[b.status] ?? 9) || a.name.localeCompare(b.name));
 }
 
+// ── Owners (used by goal reminders) ────────────────────────────────────────────────────
+/** "Ann Lee, Bo Chen & Cy Dee" → ["Ann Lee", "Bo Chen", "Cy Dee"]. */
+export function splitOwners(s: string | null | undefined): string[] {
+  return String(s ?? "").split(/\s*(?:,|&|\/|;|\band\b)\s*/i).map((x) => x.trim()).filter(Boolean);
+}
+export const ownerKey = (n: string) => n.trim().toLowerCase().replace(/\s+/g, " ");
+/** Everyone on a goal, first owner first, no duplicates. */
+export function goalOwners(g: Pick<StrategyGoal, "owner" | "secondaryOwner">): string[] {
+  const out: string[] = [];
+  for (const n of [...splitOwners(g.owner), ...splitOwners(g.secondaryOwner)]) if (!out.some((o) => ownerKey(o) === ownerKey(n))) out.push(n);
+  return out;
+}
+/** Goals where this person is listed as an owner or secondary owner. */
+export function goalsOwnedBy(goals: StrategyGoal[], name: string): StrategyGoal[] {
+  const k = ownerKey(name);
+  return goals.filter((g) => goalOwners(g).some((o) => ownerKey(o) === k));
+}
+
 /** At risk, or past its target date and not complete. */
 export function initiativeNeedsAttention(i: StrategyInitiative, today = new Date().toISOString().slice(0, 10)): boolean {
   return i.status === "At risk" || (!!i.targetDate && i.targetDate < today && i.status !== "Complete");

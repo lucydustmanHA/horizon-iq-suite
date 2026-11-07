@@ -9,6 +9,7 @@ import { goalStatus, offTrackStreak, latestReported, canOverrideMonths, MONTHS, 
 import { $deleteGoal } from "../lib/strategy.server";
 import { Card, GoalDialog, StatusPill, PriorityTag, MonthStrip, TrendChart, LoadError, EmptyState } from "../components/strategy/ui";
 import { ActivitiesPanel } from "../components/strategy/activities";
+import { ReminderButton } from "../components/strategy/reminder-dialog";
 
 export const Route = createFileRoute("/strategy/goals/$id")({
   head: () => ({ meta: [{ title: "Goal — Strategy — Horizon QX" }] }),
@@ -65,6 +66,7 @@ function GoalPage() {
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <StatusPill status={status} className="text-xs px-2.5 py-1" />
+            <ReminderButton goal={goal} allGoals={data?.goals ?? []} />
             <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setEditOpen(true)}><Pencil className="size-3.5" />Edit</Button>
             <Button variant="ghost" size="sm" className="text-slate-400 hover:text-status-danger" onClick={del} aria-label="Delete goal"><Trash2 className="size-4" /></Button>
           </div>
